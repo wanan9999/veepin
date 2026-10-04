@@ -1001,3 +1001,13 @@ each a localized extension point, not a structural rework:
 The **security boundaries** — no key zeroization, single-core throughput, and
 MASQUE's capsule-mode head-of-line blocking — are stated separately in
 [`doc/security.md`](doc/security.md).
+
+### Embedded L2TP/IPsec sessions
+
+`l2tp.ServerConfig.PacketDeviceFactory` supplies an independent IPv4 packet
+device for each authenticated PPP session. Write receives packets from that
+client; Read returns packets to send back. Close must unblock Read and release
+all session resources. The factory replaces the OS TUN, so an embedding router
+can use its own userspace TCP/IP stack without host routes or NAT. Packets are
+accepted only after IPCP is up and only from the assigned source address.
+`Server.KickUserSessions` closes the matching devices and VPN sessions.

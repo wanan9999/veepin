@@ -3,6 +3,7 @@ package l2tp
 import (
 	"encoding/binary"
 	"errors"
+	"io"
 	"net"
 	"sync"
 
@@ -16,6 +17,8 @@ import (
 
 // ServerConfig configures the L2TP/IPsec server engine.
 type ServerConfig struct {
+	PacketDeviceFactory func(string, net.IP) (io.ReadWriteCloser, error)
+
 	PSK   []byte
 	Users map[string]string // username -> password for MS-CHAPv2
 	// PublicIP is the server's outer address as clients reach it. It becomes the
@@ -111,7 +114,9 @@ func (s *Server) mtu() int {
 
 // Serve runs the data path until Close. It blocks.
 func (s *Server) Serve() error {
-	go s.tunLoop()
+	if s.cfg.PacketDeviceFactory == nil {
+		go s.tunLoop()
+	}
 	go s.recvIKE()
 	s.recvNATT()
 	return nil
@@ -123,6 +128,15 @@ func (s *Server) Close() error {
 		close(s.done)
 		s.ikeConn.Close()
 		s.nattConn.Close()
+		s.mu.Lock()
+		peers := make([]*serverPeer, 0, len(s.byCookie))
+		for _, p := range s.byCookie {
+			peers = append(peers, p)
+		}
+		s.mu.Unlock()
+		for _, p := range peers {
+			s.removePeer(p, net.ErrClosed)
+		}
 	})
 	return nil
 }
@@ -204,6 +218,11 @@ func (s *Server) dispatchIKE(msg []byte, addr *net.UDPAddr, natt bool) {
 func (s *Server) peerFor(cookie [8]byte, addr *net.UDPAddr, natt bool) *serverPeer {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	select {
+	case <-s.done:
+		return nil
+	default:
+	}
 	if p, ok := s.byCookie[cookie]; ok {
 		return p
 	}
@@ -309,7 +328,14 @@ func (s *Server) removePeer(p *serverPeer, err error) {
 	}
 	p.mu.Lock()
 	t := p.tunnel
+	p.closed = true
+	p.ready = false
+	device := p.device
+	p.device = nil
 	p.mu.Unlock()
+	if device != nil {
+		_ = device.Close()
+	}
 	if t != nil {
 		t.Close()
 	}
@@ -339,8 +365,9 @@ func (s *Server) tunLoop() {
 		}
 		p.mu.Lock()
 		t := p.tunnel
+		ready := p.ready && !p.closed
 		p.mu.Unlock()
-		if t != nil {
+		if t != nil && ready {
 			// A non-zero target pads the PPP Information field out to it, so the
 			// ESP packet this becomes is the same size whatever the inner packet
 			// was. RFC 1661 5.1 sanctions the padding; ppp.IsIP trims it back.
@@ -365,6 +392,10 @@ type serverPeer struct {
 	tunnel   *Tunnel
 	ppp      *ppp.ServerSession
 	innerIP  net.IP
+	username string
+	ready    bool
+	closed   bool
+	device   io.ReadWriteCloser
 }
 
 // noteIKEAddr commits a cryptographically verified IKE packet's endpoint.
@@ -494,7 +525,20 @@ func (p *serverPeer) SessionUp() {
 
 func (p *serverPeer) DataFrame(frame []byte) {
 	if ip, ok := ppp.IsIP(frame); ok {
-		_, _ = p.srv.tun.Write(ip)
+		p.mu.Lock()
+		ready, device := p.ready && !p.closed, p.device
+		address := append(net.IP(nil), p.innerIP...)
+		p.mu.Unlock()
+		// The authenticated peer may only send from its assigned IPv4 address.
+		// No data is admitted before both PPP authentication and IPCP complete.
+		if !ready || len(ip) < 20 || ip[0]>>4 != 4 || !net.IP(ip[12:16]).Equal(address) {
+			return
+		}
+		if device != nil {
+			_, _ = device.Write(ip)
+		} else if p.srv.tun != nil {
+			_, _ = p.srv.tun.Write(ip)
+		}
 		return
 	}
 	p.mu.Lock()
@@ -510,8 +554,42 @@ func (p *serverPeer) Closed(err error) { p.srv.removePeer(p, err) }
 // serverPPP adapts serverPeer to ppp.ServerHandler.
 type serverPPP struct{ p *serverPeer }
 
-func (h serverPPP) Authenticated(u, pw string, nt [mschap.NTResponseLen]byte) {}
+func (h serverPPP) Authenticated(u, pw string, nt [mschap.NTResponseLen]byte) {
+	h.p.mu.Lock()
+	h.p.username = u
+	h.p.mu.Unlock()
+}
 func (h serverPPP) NetworkUp() {
+	p := h.p
+	p.mu.Lock()
+	user, address := p.username, append(net.IP(nil), p.innerIP...)
+	if p.closed || p.ready || user == "" {
+		p.mu.Unlock()
+		return
+	}
+	p.mu.Unlock()
+	var device io.ReadWriteCloser
+	if factory := p.srv.cfg.PacketDeviceFactory; factory != nil {
+		var err error
+		device, err = factory(user, address)
+		if err != nil || device == nil {
+			p.srv.removePeer(p, errors.New("l2tp: session device unavailable"))
+			return
+		}
+	}
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		if device != nil {
+			device.Close()
+		}
+		return
+	}
+	p.device, p.ready = device, true
+	p.mu.Unlock()
+	if device != nil {
+		go p.deviceLoop(device)
+	}
 	h.p.srv.logger.Printf("l2tp: PPP up for %s", h.p.addr)
 }
 func (h serverPPP) Closed(err error) { h.p.srv.removePeer(h.p, err) }
@@ -522,4 +600,49 @@ func ipv4Dst(pkt []byte) net.IP {
 		return nil
 	}
 	return net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19])
+}
+
+// deviceLoop belongs to one PPP session; an address reused after disconnect can
+// never inherit queued traffic or connections from the previous session.
+func (p *serverPeer) deviceLoop(device io.ReadWriteCloser) {
+	buf := make([]byte, 65535)
+	for {
+		n, err := device.Read(buf)
+		if err != nil {
+			p.srv.removePeer(p, err)
+			return
+		}
+		p.mu.Lock()
+		ready, tunnel, address := p.ready && !p.closed, p.tunnel, append(net.IP(nil), p.innerIP...)
+		p.mu.Unlock()
+		if !ready {
+			return
+		}
+		if tunnel == nil || !ipv4Dst(buf[:n]).Equal(address) {
+			continue
+		}
+		// Session-local shaping avoids sharing mutable flow state across goroutines.
+		if err := tunnel.SendPPP(ppp.EncapsulateIPPadded(buf[:n], 0)); err != nil {
+			p.srv.removePeer(p, err)
+			return
+		}
+	}
+}
+
+func (s *Server) KickUserSessions(user string) int {
+	s.mu.Lock()
+	var peers []*serverPeer
+	for _, p := range s.byCookie {
+		p.mu.Lock()
+		match := p.username == user
+		p.mu.Unlock()
+		if match {
+			peers = append(peers, p)
+		}
+	}
+	s.mu.Unlock()
+	for _, p := range peers {
+		s.removePeer(p, errors.New("l2tp: user disconnected"))
+	}
+	return len(peers)
 }

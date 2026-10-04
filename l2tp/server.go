@@ -2,6 +2,7 @@ package l2tp
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -49,7 +50,20 @@ const (
 const defaultPool = "10.20.0.0/24"
 
 // ServerConfig configures an L2TP/IPsec responder and its userspace data path.
+// PacketDevice carries one IPv4 packet per Read/Write; Close must unblock Read.
+// Write receives client packets; Read supplies packets to send to the client.
+type PacketDevice = io.ReadWriteCloser
+
+// PacketDeviceFactory runs after PPP authentication and IPCP negotiation. Each
+// session owns its device, including all connections opened by its network stack.
+type PacketDeviceFactory func(username string, address net.IP) (PacketDevice, error)
+
 type ServerConfig struct {
+	// PacketDeviceFactory replaces the OS TUN with a per-session userspace device.
+	// The server closes every device on disconnect or shutdown. When set, no host
+	// interface, route, forwarding rule, or NAT configuration is required.
+	PacketDeviceFactory PacketDeviceFactory
+
 	// ListenIP is the local IP to bind the IKE/ESP sockets on (default 0.0.0.0).
 	ListenIP string
 	// PublicIP is the server's address as clients reach it, used as the IKE
@@ -134,22 +148,26 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		ikeConn.Close()
 		return nil, fmt.Errorf("l2tp: bind %s:%d: %w", cfg.ListenIP, nattPort, err)
 	}
-	tun, err := dataplane.OpenTUN(cfg.TUNName)
-	if err != nil {
-		ikeConn.Close()
-		nattConn.Close()
-		return nil, fmt.Errorf("l2tp: open TUN: %w", err)
+	var tun *dataplane.TUN
+	if cfg.PacketDeviceFactory == nil {
+		tun, err = dataplane.OpenTUN(cfg.TUNName)
+		if err != nil {
+			ikeConn.Close()
+			nattConn.Close()
+			return nil, fmt.Errorf("l2tp: open TUN: %w", err)
+		}
 	}
 
 	eng := engine.NewServer(ikeConn, nattConn, tun, engine.ServerConfig{
-		PSK:      []byte(cfg.PSK),
-		Users:    cfg.Users,
-		PublicIP: net.ParseIP(cfg.PublicIP),
-		Pool:     pool,
-		Gateway:  gateway,
-		DNS:      cfg.DNS,
-		Shape:    cfg.Shape,
-		Logger:   logger,
+		PSK:                 []byte(cfg.PSK),
+		PacketDeviceFactory: cfg.PacketDeviceFactory,
+		Users:               cfg.Users,
+		PublicIP:            net.ParseIP(cfg.PublicIP),
+		Pool:                pool,
+		Gateway:             gateway,
+		DNS:                 cfg.DNS,
+		Shape:               cfg.Shape,
+		Logger:              logger,
 	})
 	return &Server{eng: eng, tun: tun, pool: pool, gateway: gateway}, nil
 }
@@ -160,7 +178,9 @@ func (s *Server) ListenAndServe() error { return s.eng.Serve() }
 // Close stops the server and releases the TUN and socket.
 func (s *Server) Close() error {
 	err := s.eng.Close()
-	s.tun.Close()
+	if s.tun != nil {
+		s.tun.Close()
+	}
 	return err
 }
 
@@ -173,7 +193,13 @@ func (s *Server) Close() error {
 // the lock Close takes -- deliberately, because a wedged Close may be holding
 // that lock, and waiting on it here would reproduce the very stall this is the
 // escape from.
-func (s *Server) Abandon() { s.tun.Close() }
+func (s *Server) Abandon() {
+	if s.tun != nil {
+		s.tun.Close()
+	} else {
+		_ = s.eng.Close()
+	}
+}
 
 // Server implements client.AbandonableServer, so the supervisor can take its
 // descriptors back when Close overruns. Asserted here because the interface is
@@ -183,7 +209,15 @@ func (s *Server) Abandon() { s.tun.Close() }
 var _ client.AbandonableServer = (*Server)(nil)
 
 // TUNName is the interface the data path is bound to.
-func (s *Server) TUNName() string { return s.tun.Name() }
+func (s *Server) TUNName() string {
+	if s.tun == nil {
+		return ""
+	}
+	return s.tun.Name()
+}
+
+// KickUserSessions disconnects authenticated sessions of this user.
+func (s *Server) KickUserSessions(user string) int { return s.eng.KickUserSessions(user) }
 
 // Gateway is the server's own tunnel-side address (the pool's first host).
 func (s *Server) Gateway() net.IP { return s.gateway }
