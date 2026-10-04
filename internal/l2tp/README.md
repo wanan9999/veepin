@@ -75,8 +75,11 @@ Control vs data is demuxed by the header **T-bit**.
 
 Half-open admission slots are released exactly once on IPsec establishment or
 failure. Setup must reach PPP network-up within 60 seconds. Established sessions
-send an encrypted L2TP HELLO every 30 seconds, requiring its acknowledgement
-within 10 seconds (the reliable channel may fail earlier). Silent peers release
+send an encrypted L2TP HELLO every 30 seconds. RFC 2661 section 5.8 exponential
+backoff retries at 1, 3, 7, 15 and 23 seconds, clearing an unresponsive tunnel
+at 31 seconds. The monitor waits for this reliable-channel result instead of
+imposing a competing shorter deadline. Advancing acknowledgements reset the
+oldest outstanding message's retry budget. Silent peers release
 their IP, packet device, indexes and protocol timers. Socket or TUN read failure
 is returned from Serve rather than leaving a partially listening server healthy.
 

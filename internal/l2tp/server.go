@@ -790,7 +790,7 @@ func (p *serverPeer) releaseAdmission() {
 
 // A HELLO tests both ESP and L2TP without requiring a vendor DPD extension.
 // The absolute setup deadline also covers a silent PPP authentication peer.
-func (p *serverPeer) monitor() { p.monitorWithTimeouts(time.Minute, 30*time.Second, 10*time.Second) }
+func (p *serverPeer) monitor() { p.monitorWithTimeouts(time.Minute, 30*time.Second, 0) }
 
 func (p *serverPeer) monitorWithTimeouts(setupTimeout, interval, probeTimeout time.Duration) {
 	setup := time.NewTimer(setupTimeout)
@@ -817,7 +817,14 @@ func (p *serverPeer) monitorWithTimeouts(setupTimeout, interval, probeTimeout ti
 			if !ready || tunnel == nil {
 				continue
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+			// HELLO is a reliable control message. Let its retransmission budget
+			// decide peer failure instead of racing it with a shorter idle timeout.
+			// Explicit short deadlines remain useful for isolated lifecycle tests.
+			ctx, cancel := context.WithCancel(context.Background())
+			if probeTimeout > 0 {
+				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), probeTimeout)
+			}
 			err := tunnel.SendHello(ctx)
 			cancel()
 			if err != nil {

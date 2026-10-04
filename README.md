@@ -116,6 +116,7 @@ go vet ./...
 
 - L2TP/IPsec 使用 IKEv1 Main Mode + PSK、MS-CHAPv2 与 UDP 封装 ESP；不支持裸 ESP、证书认证、Aggressive Mode 或 Quick Mode PFS。
 - 已包含 TunnelForge 0.7.4 所需 AES-128/SHA-1 算法兼容处理，并保留 AES-256。L2TP 支持续期与寿命限制处理，但 Windows、爱快的长期运行兼容性仍需真机验收。
+- L2TP 控制消息按 RFC 2661 指数退避重传，探活复用可靠通道的失败判定，避免短时丢包过早清理连接。测试包含模拟时钟推进 25 小时的 IKE/ESP 换钥与回收；不等于真实公网连续 24 小时验收。
 - 不同协议的身份认证、加密与重协商能力不同；安全边界见 [安全说明](doc/security.md)，不要把所有协议视为同一安全等级。
 - 性能取决于算法、CPU、包长、客户端与网络。基准或 Docker 吞吐量不能直接等同于真实公网带宽。
 

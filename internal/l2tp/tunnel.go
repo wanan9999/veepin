@@ -37,10 +37,11 @@ type Handler interface {
 // handshake; a reliable path (loopback, or an ESP SA over a healthy link) needs
 // no retries, but a lossy path must not stall forever.
 const (
-	defaultHostName    = "veepin"
-	defaultWindowSize  = 4
-	retransmitInterval = 1 * time.Second
-	maxRetransmits     = 5
+	defaultHostName       = "veepin"
+	defaultWindowSize     = 4
+	retransmitInterval    = 1 * time.Second
+	maxRetransmitInterval = 8 * time.Second
+	maxRetransmits        = 5
 )
 
 // handshake states, progressing in message order for each role.
@@ -89,11 +90,12 @@ type Tunnel struct {
 	localTunnelID  uint16
 	localSessionID uint16
 
-	ns, nr   uint16
-	unacked  []pending
-	timer    *time.Timer
-	retries  int
-	closeErr error
+	ns, nr          uint16
+	unacked         []pending
+	timer           *time.Timer
+	timerGeneration uint64
+	retries         int
+	closeErr        error
 
 	// helloNs is the sequence number of the HELLO a probe is waiting on, and
 	// helloWait the channel closed when the peer acknowledges it (or the
@@ -433,6 +435,11 @@ func (t *Tunnel) sendZLB() {
 // purgeAcked drops unacked messages the peer's Nr covers, and stops the timer
 // once the window is empty. Called under mu.
 func (t *Tunnel) purgeAcked(peerNr uint16) {
+	// An acknowledgement cannot cover a sequence number not yet sent.
+	if seqLess(t.ns, peerNr) {
+		return
+	}
+	previous := len(t.unacked)
 	kept := t.unacked[:0]
 	for _, p := range t.unacked {
 		if seqLess(p.ns, peerNr) {
@@ -445,24 +452,40 @@ func (t *Tunnel) purgeAcked(peerNr uint16) {
 		kept = append(kept, p)
 	}
 	t.unacked = kept
-	if len(t.unacked) == 0 {
+	if len(t.unacked) < previous {
 		t.retries = 0
 		if t.timer != nil {
 			t.timer.Stop()
 			t.timer = nil
+			t.timerGeneration++
+		}
+		if len(t.unacked) != 0 {
+			t.armTimer()
 		}
 	}
+}
+
+// RFC 2661 section 5.8: exponential backoff, with a cap of at least 8s.
+// retries counts retransmissions already sent, so the first timeout is 1s.
+func retransmitDelay(retries int) time.Duration {
+	return min(retransmitInterval<<min(max(retries, 0), 3), maxRetransmitInterval)
 }
 
 func (t *Tunnel) armTimer() {
 	if t.timer != nil {
 		return
 	}
-	t.timer = time.AfterFunc(retransmitInterval, t.onRetransmit)
+	t.timerGeneration++
+	generation := t.timerGeneration
+	t.timer = time.AfterFunc(retransmitDelay(t.retries), func() { t.onRetransmit(generation) })
 }
 
-func (t *Tunnel) onRetransmit() {
+func (t *Tunnel) onRetransmit(generation uint64) {
 	t.mu.Lock()
+	if generation != t.timerGeneration {
+		t.mu.Unlock()
+		return
+	}
 	t.timer = nil
 	if t.state == stateClosed || len(t.unacked) == 0 {
 		t.mu.Unlock()
@@ -477,7 +500,7 @@ func (t *Tunnel) onRetransmit() {
 	for _, p := range t.unacked {
 		_ = t.send(t.buildControl(p))
 	}
-	t.timer = time.AfterFunc(retransmitInterval, t.onRetransmit)
+	t.armTimer()
 	t.mu.Unlock()
 }
 
@@ -507,6 +530,7 @@ func (t *Tunnel) finishClose(err error) {
 	if t.timer != nil {
 		t.timer.Stop()
 		t.timer = nil
+		t.timerGeneration++
 	}
 	// A probe blocked on an acknowledgement that is never coming is released
 	// here rather than left to its context deadline, so a tunnel that has
