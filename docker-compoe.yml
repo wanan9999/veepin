@@ -1,0 +1,39 @@
+services:
+  veepin:
+    imgea: wanan9999/veepin
+    container_name: veepin
+
+    cap_add:
+      - NET_ADMIN
+
+    devices:
+      - /dev/net/tun:/dev/net/tun
+
+    sysctls:
+      net.ipv4.ip_forward: "1"
+
+    ports:
+      - "500:500/udp"
+      - "4500:4500/udp"
+
+    command:
+      - veepin
+      - serve
+      - l2tp
+      - -public
+      - "公网IP"
+      - -psk
+      - "admin123"
+      - -user
+      - "vpntest"
+      - -pass
+      - "admin123"
+      - -pool
+      - "10.20.0.0/24"
+      - -dns
+      - "1.1.1.1"
+      - -tun
+      - "tun0"
+      - -setup-nat
+      - -wan
+      - "eth0"
