@@ -37,6 +37,49 @@ advertises NAT-T is therefore rejected during Main Mode rather than left to fail
 silently later. Both directions are verified in Docker against strongSwan +
 xl2tpd.
 
+## TunnelForge algorithm compatibility
+
+The L2TP server accepts TunnelForge v0.7.4's AES-128-CBC / SHA-1 / MODP-2048
+Main Mode offer and AES-128-CBC / HMAC-SHA1-96 transport-mode ESP offer. No
+additional CLI flag is needed. AES-256 suites remain accepted and the veepin
+client's default offers remain unchanged. 3DES is not enabled.
+
+The peer wire fixtures are pinned to TunnelForge commit
+`bf3df64da2aa24c8b0ff379614dc991fa42f3f2a`, in
+`android/app/src/main/cpp/ikev1.c` (`build_p1_sa`, `build_p2_esp_sa`). Unit tests
+exercise Main Mode, Quick Mode and bidirectional ESP with those offers. A
+separate strongSwan/xl2tpd cell restricts both phases to AES-128/SHA-1:
+
+```sh
+go test ./internal/ikev1 -run 'TestTunnelForge|TestAES128' -count=1 -v
+cd tests/interop
+docker compose -f compose.l2tp-server-aes128.yml down -v --remove-orphans
+go test -tags interop -run '^TestInteropL2TPClientVeepinServerAES128$' -count=1 -v -timeout 15m .
+```
+
+The Docker test needs a Linux host with TUN, PPP and Docker Compose. It checks
+the negotiated suites and a ping through PPP, not just a successful IKE SA.
+It is an independent implementation using the same algorithms, **not** a
+TunnelForge Android test. Phone acceptance still requires dialing the rebuilt
+server, checking IPCP and `10.20.0.1`, then verifying IPv4 internet traffic and
+DNS separately if NAT is configured. Long-lived connections/rekey, reconnects
+and simultaneous clients require their own acceptance tests.
+
+To deploy a local build, rebuild its image and recreate the existing service:
+
+```sh
+docker build -t veepin-local:tunnelforge .
+# Set image: veepin-local:tunnelforge in your existing Compose file first.
+docker compose up -d --force-recreate
+docker compose logs -f
+```
+
+Preserve the public IP, credentials, UDP 500/4500 mappings and TUN/NET_ADMIN
+settings. If `no acceptable IKE proposal offered` remains, verify the container
+uses the rebuilt image and inspect the actual peer proposal. Passing this
+algorithm regression does not resolve the implementation's other security or
+lifecycle limitations.
+
 ## Downstream flow shaping
 
 `-shape <bytes>` pads the first N bytes of each inner flow out to the tunnel

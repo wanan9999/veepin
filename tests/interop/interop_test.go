@@ -1203,6 +1203,16 @@ func TestInteropL2TPClientVeepinServer(t *testing.T) {
 	runInteropBench(t, "compose.l2tp-server.yml", "l2tp-client", "veepin-l2tp-server", "10.20.0.1")
 }
 
+// TestInteropL2TPClientVeepinServerAES128 uses an independent implementation
+// restricted to TunnelForge's algorithms, including the ESP key length. It
+// checks the negotiated suites as well as PPP traffic, so an AES-256 fallback
+// cannot make a broken AES-128 implementation look interoperable.
+func TestInteropL2TPClientVeepinServerAES128(t *testing.T) {
+	runInteropRequiringLog(t, "compose.l2tp-server-aes128.yml", "l2tp-client", "10.20.0.1",
+		"IKE:AES_CBC_128/HMAC_SHA1_96/PRF_HMAC_SHA1/MODP_2048",
+		"ESP:AES_CBC_128/HMAC_SHA1_96")
+}
+
 // TestInteropL2TPClientVeepinServerShaped is the same cell with downstream flow
 // shaping on. L2TP/IPsec stacks PPP inside L2TP inside ESP, and the padding goes
 // in the innermost of those -- the PPP Information field, which RFC 1661 5.1

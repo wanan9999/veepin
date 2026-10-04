@@ -16,7 +16,7 @@ echo "${USER:-l2tpuser} * ${PASS:-l2tppass} *" > /etc/ppp/chap-secrets
 chmod 600 /etc/ppp/chap-secrets
 
 mkdir -p /etc/swanctl/conf.d
-cp /conf/swanctl-l2tp-client.conf /etc/swanctl/conf.d/l2tp.conf
+cp "${SWANCTL_CONFIG:-/conf/swanctl-l2tp-client.conf}" /etc/swanctl/conf.d/l2tp.conf
 
 /usr/lib/ipsec/charon &
 CHARON=$!

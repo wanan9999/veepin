@@ -56,5 +56,9 @@ sequenceDiagram
 - **NAT-T is forced deterministic between containers.** NAT-D payloads detect NAT;
   where same-L2 peers wouldn't, ESP is still UDP-encapsulated on 4500 so framing is
   predictable (mirroring the IKEv2 data path).
-- **Only PSK auth, MODP-2048 + AES-CBC-256 + SHA-256** by default, to keep the
-  proposal small; widen only if a stock client insists on group 2 / SHA1.
+- **Initiators offer AES-CBC-256 with SHA-256 or SHA-1 and MODP-2048.** L2TP
+  responders additionally accept AES-CBC-128 in both IKE and ESP for peers such
+  as TunnelForge v0.7.4. The same negotiated length drives key derivation and
+  encryption. Cisco profiles and initiator offers are unchanged; 3DES and
+  MODP-1024 remain unsupported. AES-128/SHA-1 compatibility does not provide
+  rekey support or establish that every native client is interoperable.

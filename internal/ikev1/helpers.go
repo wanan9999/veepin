@@ -154,9 +154,18 @@ func ikePropFromAttrs(attrs []attr) (ikeProposal, bool) {
 // profile with no credentials to give would stall — both are better refused
 // here, where the reason is still legible.
 func (s *Session) supportedIKE(p ikeProposal) bool {
-	return p.encr == encrAES && p.keyBits == 256 &&
+	return p.encr == encrAES && s.supportedAESKeyBits(p.keyBits) &&
 		(p.hash == hashSHA2256 || p.hash == hashSHA) &&
 		p.group == groupMODP2048 && p.auth == s.authMethod()
+}
+
+// supportedAESKeyBits keeps the initiator's AES-256 policy while allowing
+// L2TP responders to negotiate TunnelForge's AES-128 suites in BOTH phases.
+// The existing cipher and KEYMAT implementations use the negotiated length.
+// Restrict the addition to L2TP servers: an initiator must not accept AES-128
+// from a responder when its own offer contained only AES-256.
+func (s *Session) supportedAESKeyBits(bits uint16) bool {
+	return bits == 256 || (bits == 128 && s.cfg.Role == Responder && s.cfg.Phase2 == Phase2L2TP)
 }
 
 func (s *Session) selectIKEProposal(transforms []parsedTransform) (ikeProposal, uint8, bool) {
@@ -189,7 +198,7 @@ func (s *Session) supportedESP(p espProposal) bool {
 	} else {
 		okEncap = p.encap == encapUDPTransport || p.encap == encapTransport || p.encap == encapUDPTransportDraft
 	}
-	return p.transformID == espTransformAES && p.keyBits == 256 &&
+	return p.transformID == espTransformAES && s.supportedAESKeyBits(p.keyBits) &&
 		(p.authAlg == authHMACSHA2256 || p.authAlg == authHMACSHA) && okEncap
 }
 

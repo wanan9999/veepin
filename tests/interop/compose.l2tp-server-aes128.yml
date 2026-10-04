@@ -1,0 +1,16 @@
+# Independent peer with TunnelForge's AES-128/SHA-1 algorithms in BOTH phases.
+# No AES-256 or 3DES fallback: a successful ping exercises IKE, ESP, L2TP and PPP.
+name: veepin-interop-l2tp-server-aes128
+
+services:
+  veepin-l2tp-server:
+    extends:
+      file: compose.l2tp-server.yml
+      service: veepin-l2tp-server
+
+  l2tp-client:
+    extends:
+      file: compose.l2tp-server.yml
+      service: l2tp-client
+    environment:
+      SWANCTL_CONFIG: /conf/swanctl-l2tp-aes128.conf

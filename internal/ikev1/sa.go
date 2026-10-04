@@ -17,7 +17,7 @@ type ikeProposal struct {
 	lifeSeconds uint32
 }
 
-// defaultIKEProposals is what the initiator offers and the responder accepts,
+// defaultIKEProposals is what the initiator offers,
 // preferred first. AES-256 over MODP-2048 with SHA2-256, then a SHA-1 fallback
 // for older native clients. Only MODP-2048 is offered — the sole finite-field
 // group cryptoutil implements; MODP-1024 (group 2) can be added there if a stock

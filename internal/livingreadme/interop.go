@@ -156,6 +156,7 @@ var interopMatrix = []interopRow{
 		Client:   interopCell{Tests: []string{"TestInteropVeepinClientL2TPServer"}, Label: "strongSwan + xl2tpd"},
 		Server: interopCell{Tests: []string{
 			"TestInteropL2TPClientVeepinServer",
+			"TestInteropL2TPClientVeepinServerAES128",
 			"TestInteropL2TPClientVeepinServerShaped",
 		}, Label: "strongSwan + xl2tpd (+ PPP-padded)"},
 		Self: interopCell{Tests: []string{"TestInteropL2TPSelf"}},

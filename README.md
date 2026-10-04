@@ -38,6 +38,11 @@ added next, and what was considered and rejected, is in
 
 ## What it does
 
+L2TP servers also accept TunnelForge v0.7.4's AES-128/SHA-1 proposals in both
+IKE and ESP, while retaining AES-256 support. See the
+[compatibility tests and deployment procedure](doc/usage/l2tp.md#tunnelforge-algorithm-compatibility)
+for the distinction between algorithm regression tests and Android acceptance.
+
 veepin speaks sixteen production protocols — **client and server for every one** —
 plus one deliberately insecure teaching example. Each protocol is verified in
 Docker against a real third-party implementation *and* against itself (see the
