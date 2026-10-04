@@ -109,6 +109,7 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 	})
 	t.Cleanup(func() { s.mu.Lock(); defer s.mu.Unlock(); s.advance() })
 	h := header{initCookie: [8]byte{1, 2, 3, 4, 5, 6, 7, 8}, exchange: exchangeMain}
+	var lastReply []byte
 	receive := func() (header, uint8, []byte) {
 		t.Helper()
 		select {
@@ -118,6 +119,7 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 		}
 		select {
 		case b := <-out:
+			lastReply = append([]byte(nil), b...)
 			hr, first, rest, err := parseHeader(b)
 			if err != nil {
 				t.Fatal(err)
@@ -182,7 +184,7 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 		t.Fatal("AES-128 must truncate SKEYID_e")
 	}
 	keys.setInitialIV(pub, peerPub)
-	sendEncrypted := func(iv *[]byte, ps []payload) {
+	sendEncrypted := func(iv *[]byte, ps []payload) []byte {
 		t.Helper()
 		first, plain := payloadChain(ps)
 		ct, err := cbcEncrypt(keys.encKey, *iv, plain)
@@ -190,7 +192,9 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 			t.Fatal(err)
 		}
 		*iv = lastBlock(ct)
-		s.HandleInbound(assemble(h, first, ct))
+		packet := assemble(h, first, ct)
+		s.HandleInbound(packet)
+		return packet
 	}
 	decrypt := func(iv *[]byte) ([]payload, []byte, int) {
 		t.Helper()
@@ -208,7 +212,7 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 	}
 	id := buildID(ipv4ID(net.IPv4(192, 0, 2, 2)))
 	h.flags = flagEncryption
-	sendEncrypted(&keys.iv, []payload{{typ: payloadID, body: id}, {typ: payloadHash, body: keys.hashI(pub, peerPub, h.initCookie, h.respCookie, sa, id)}})
+	mm5 := sendEncrypted(&keys.iv, []payload{{typ: payloadID, body: id}, {typ: payloadHash, body: keys.hashI(pub, peerPub, h.initCookie, h.respCookie, sa, id)}})
 	if wrongPSK {
 		// A wrong PSK also changes the CBC key, so rejection may happen while
 		// parsing the decrypted payload, before HASH_I can be checked.
@@ -225,6 +229,24 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 		return
 	}
 	mm6, _, _ := decrypt(&keys.iv)
+	// Model a lost MM6. An exact MM5 retry must return the same ciphertext,
+	// preserving the CBC IV and retry budget while already waiting for QM1.
+	cachedMM6 := append([]byte(nil), lastReply...)
+	cachedIV := append([]byte(nil), s.keys.iv...)
+	retries := s.retries
+	s.HandleInbound(mm5)
+	receive()
+	if !bytes.Equal(lastReply, cachedMM6) || !bytes.Equal(s.keys.iv, cachedIV) || s.retries != retries {
+		t.Fatal("MM5 retransmission changed the response, CBC IV or retry budget")
+	}
+	modified := append([]byte(nil), mm5...)
+	modified[len(modified)-1] ^= 1
+	s.HandleInbound(modified)
+	select {
+	case <-out:
+		t.Fatal("modified MM5 replayed a cached response")
+	default:
+	}
 	if !bytes.Equal(body(mm6, payloadHash), keys.hashR(pub, peerPub, h.initCookie, h.respCookie, sa, body(mm6, payloadID))) {
 		t.Fatal("responder HASH_R did not authenticate")
 	}

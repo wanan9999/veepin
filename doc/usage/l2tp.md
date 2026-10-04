@@ -44,6 +44,14 @@ Main Mode offer and AES-128-CBC / HMAC-SHA1-96 transport-mode ESP offer. No
 additional CLI flag is needed. AES-256 suites remain accepted and the veepin
 client's default offers remain unchanged. 3DES is not enabled.
 
+TunnelForge v0.7.4 completes Main Mode on UDP/500 and moves to UDP/4500 for
+Quick Mode. The server follows the observed IKE transport rather than sending
+MM6 to a guessed client port 4500 as soon as NAT-T is negotiated. Clients that
+float before MM5 or start on UDP/4500 remain supported. Exact retransmissions
+receive the cached reply without advancing CBC state or resetting the timeout.
+`ignoring exchange type 2 while awaiting 32` alongside an MM6 timeout is a reason
+to check this transport transition, not to change the PSK or expose UDP/1701.
+
 The peer wire fixtures are pinned to TunnelForge commit
 `bf3df64da2aa24c8b0ff379614dc991fa42f3f2a`, in
 `android/app/src/main/cpp/ikev1.c` (`build_p1_sa`, `build_p2_esp_sa`). Unit tests
@@ -52,6 +60,7 @@ separate strongSwan/xl2tpd cell restricts both phases to AES-128/SHA-1:
 
 ```sh
 go test ./internal/ikev1 -run 'TestTunnelForge|TestAES128' -count=1 -v
+go test ./internal/l2tp -run '^TestIKERepliesFollowObservedTransport$' -count=1 -v
 cd tests/interop
 docker compose -f compose.l2tp-server-aes128.yml down -v --remove-orphans
 go test -tags interop -run '^TestInteropL2TPClientVeepinServerAES128$' -count=1 -v -timeout 15m .

@@ -128,7 +128,8 @@ func (s *Server) Close() error {
 }
 
 // recvIKE reads the plain IKE port. Every datagram here is a bare Main Mode
-// message — the float moves a session off this socket for good.
+// message. Some clients (TunnelForge v0.7.4) finish Main Mode here and only
+// move to NAT-T for Quick Mode; others float before MM5.
 func (s *Server) recvIKE() {
 	buf := make([]byte, 65535)
 	for {
@@ -353,6 +354,7 @@ type serverPeer struct {
 	mu       sync.Mutex
 	addr     *net.UDPAddr // where Main Mode came from
 	nattAddr *net.UDPAddr // where floated IKE and ESP go
+	ikeNATT  bool         // peer has actually sent IKE on the NAT-T socket
 	sa       *esp.SA
 	inSPI    uint32
 	tunnel   *Tunnel
@@ -368,6 +370,7 @@ func (p *serverPeer) noteIKEAddr(addr *net.UDPAddr, natt bool) {
 	defer p.mu.Unlock()
 	if natt {
 		p.nattAddr = addr
+		p.ikeNATT = true
 	} else {
 		p.addr = addr
 	}
@@ -383,10 +386,15 @@ func (p *serverPeer) noteAddr(addr *net.UDPAddr) {
 	p.mu.Unlock()
 }
 
-func (p *serverPeer) sendIKE(msg []byte, natt bool) error {
+func (p *serverPeer) sendIKE(msg []byte, _ bool) error {
 	p.mu.Lock()
 	ike, nat := p.addr, p.nattAddr
+	natt := p.ikeNATT
 	p.mu.Unlock()
+	// Negotiating NAT-T does not reveal the client's translated UDP/4500
+	// endpoint. Reply on the transport it actually used until it floats.
+	// TunnelForge finishes MM5/MM6 on UDP/500; guessing port 4500 loses MM6
+	// behind NAT. A peer starting on 4500 also needs its MM2 sent there.
 	if natt {
 		_, err := p.srv.nattConn.WriteToUDP(markIKE(msg), nat)
 		return err

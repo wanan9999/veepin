@@ -56,6 +56,11 @@ sequenceDiagram
 - **NAT-T is forced deterministic between containers.** NAT-D payloads detect NAT;
   where same-L2 peers wouldn't, ESP is still UDP-encapsulated on 4500 so framing is
   predictable (mirroring the IKEv2 data path).
+- **Retransmissions replay ciphertext, not state transitions.** An exact repeat
+  of the last accepted request gets the cached response even after the state
+  advances (MM5 while awaiting Quick Mode is the important case). Neither the
+  CBC IV nor the retry budget changes. L2TP sends responses on the client's
+  observed IKE transport, including clients that float only after MM6.
 - **Initiators offer AES-CBC-256 with SHA-256 or SHA-1 and MODP-2048.** L2TP
   responders additionally accept AES-CBC-128 in both IKE and ESP for peers such
   as TunnelForge v0.7.4. The same negotiated length drives key derivation and

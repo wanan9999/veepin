@@ -1,6 +1,7 @@
 package ikev1
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/binary"
@@ -256,11 +257,12 @@ type Session struct {
 	inSPI      uint32 // our inbound ESP SPI
 	outSPI     uint32 // peer's inbound ESP SPI (stamped on our outbound ESP)
 
-	// Retransmission of the last message we sent. lastSentNATT pins it to the
-	// port it originally went out on: the responder floats immediately after
-	// sending MM4, and a retransmit of MM4 must still use the pre-float port.
+	// Retransmission of the last message we sent. lastSentNATT preserves the
+	// engine's transport hint (MM4 precedes the float). The L2TP responder's
+	// socket adapter additionally waits for the peer's observed NAT-T endpoint.
 	lastSent     []byte
 	lastSentNATT bool
+	lastReceived []byte // exact accepted request that produced lastSent
 	timer        *time.Timer
 	retries      int
 }
@@ -328,8 +330,19 @@ func (s *Session) HandleInbound(pkt []byte) {
 		}
 		return
 	}
+	// A lost reply makes the peer retransmit its previous request, even though
+	// we already advanced (e.g. MM5 while waiting for QM1). Replay the cached
+	// ciphertext without decrypting again or advancing the CBC IV. Do not reset
+	// the retry budget: duplicate traffic must not keep a half-open SA forever.
+	if len(s.lastSent) != 0 && bytes.Equal(pkt, s.lastReceived) {
+		_ = s.cfg.Send(s.lastSent, s.lastSentNATT)
+		return
+	}
+	previousState := s.state
 	if err := s.dispatch(h, first, rest); err != nil {
 		s.failLocked(err)
+	} else if s.state != previousState && len(s.lastSent) != 0 {
+		s.lastReceived = append(s.lastReceived[:0], pkt...)
 	}
 }
 
