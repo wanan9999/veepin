@@ -7,8 +7,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/xen0bit/veepin/internal/mschap"
-	"github.com/xen0bit/veepin/internal/sstp/wire"
+	"github.com/wanan9999/veepin/internal/mschap"
+	"github.com/wanan9999/veepin/internal/sstp/wire"
 )
 
 var sstpLabel = []byte("SSTP inner method derived CMK")

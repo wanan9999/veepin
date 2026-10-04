@@ -34,7 +34,7 @@ assumes the server is at `$SERVER` and you are running as root (the TUN needs
 `CAP_NET_ADMIN`).
 
 ```sh
-git clone https://github.com/xen0bit/veepin && cd veepin && go build ./cmd/veepin
+git clone https://github.com/wanan9999/veepin && cd veepin && go build ./cmd/veepin
 ```
 
 ## Per-client server invocations

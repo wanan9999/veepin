@@ -2,7 +2,7 @@ package masque
 
 // Client option metadata for the Dial surface.
 
-import "github.com/xen0bit/veepin/client"
+import "github.com/wanan9999/veepin/client"
 
 func init() {
 	client.RegisterClientOpts("masque", []client.OptSpec{

@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/livingreadme"
+	"github.com/wanan9999/veepin/internal/livingreadme"
 )
 
 // pingDeadline bounds how long we retry the cross-tunnel ping. It must cover

@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/cryptoutil"
-	"github.com/xen0bit/veepin/internal/wireguard/wire"
+	"github.com/wanan9999/veepin/internal/cryptoutil"
+	"github.com/wanan9999/veepin/internal/wireguard/wire"
 )
 
 // Protocol constants (protocol paper §5.4).

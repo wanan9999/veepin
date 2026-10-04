@@ -21,35 +21,35 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/internal/keygen"
-	"github.com/xen0bit/veepin/internal/profile"
-	"github.com/xen0bit/veepin/internal/supervisor"
-	"github.com/xen0bit/veepin/internal/vlog"
-	"github.com/xen0bit/veepin/wireguard"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/internal/keygen"
+	"github.com/wanan9999/veepin/internal/profile"
+	"github.com/wanan9999/veepin/internal/supervisor"
+	"github.com/wanan9999/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/wireguard"
 
 	// Blank-import the production facades so the registry the API reads from
 	// (client.ServerProtocols, client.ServerOptsFor) knows every server
 	// protocol, matching the binary's runtime surface. Without these, the
 	// registry appears empty and the protocol/redaction paths would silently
 	// take their fallback branches during tests.
-	_ "github.com/xen0bit/veepin/amneziawg"
-	_ "github.com/xen0bit/veepin/anyconnect"
-	_ "github.com/xen0bit/veepin/cisco"
-	_ "github.com/xen0bit/veepin/fortinet"
-	_ "github.com/xen0bit/veepin/gp"
-	_ "github.com/xen0bit/veepin/ikev2"
-	_ "github.com/xen0bit/veepin/l2tp"
-	_ "github.com/xen0bit/veepin/l2tpv3"
-	_ "github.com/xen0bit/veepin/masque"
-	_ "github.com/xen0bit/veepin/nebula"
-	_ "github.com/xen0bit/veepin/openvpn"
-	_ "github.com/xen0bit/veepin/pulse"
-	_ "github.com/xen0bit/veepin/softether"
-	_ "github.com/xen0bit/veepin/ssh"
-	_ "github.com/xen0bit/veepin/sstp"
-	_ "github.com/xen0bit/veepin/toy"
-	_ "github.com/xen0bit/veepin/wireguard"
+	_ "github.com/wanan9999/veepin/amneziawg"
+	_ "github.com/wanan9999/veepin/anyconnect"
+	_ "github.com/wanan9999/veepin/cisco"
+	_ "github.com/wanan9999/veepin/fortinet"
+	_ "github.com/wanan9999/veepin/gp"
+	_ "github.com/wanan9999/veepin/ikev2"
+	_ "github.com/wanan9999/veepin/l2tp"
+	_ "github.com/wanan9999/veepin/l2tpv3"
+	_ "github.com/wanan9999/veepin/masque"
+	_ "github.com/wanan9999/veepin/nebula"
+	_ "github.com/wanan9999/veepin/openvpn"
+	_ "github.com/wanan9999/veepin/pulse"
+	_ "github.com/wanan9999/veepin/softether"
+	_ "github.com/wanan9999/veepin/ssh"
+	_ "github.com/wanan9999/veepin/sstp"
+	_ "github.com/wanan9999/veepin/toy"
+	_ "github.com/wanan9999/veepin/wireguard"
 )
 
 // fakeMgr stands in for *supervisor.Manager so the API tests don't need a

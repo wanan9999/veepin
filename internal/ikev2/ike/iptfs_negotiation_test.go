@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/ikev2/aggfrag"
-	"github.com/xen0bit/veepin/internal/ikev2/payload"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/ikev2/aggfrag"
+	"github.com/wanan9999/veepin/internal/ikev2/payload"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // The USE_AGGFRAG negotiation had no test at all, on either side, which is how

@@ -19,10 +19,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/dataplane"
-	itoy "github.com/xen0bit/veepin/internal/toy"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/dataplane"
+	itoy "github.com/wanan9999/veepin/internal/toy"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 func init() {

@@ -15,15 +15,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/dataplane"
-	"github.com/xen0bit/veepin/internal/debuglog"
-	"github.com/xen0bit/veepin/internal/mschap"
-	"github.com/xen0bit/veepin/internal/ppp"
-	"github.com/xen0bit/veepin/internal/pqpolicy"
-	"github.com/xen0bit/veepin/internal/sstp/wire"
-	"github.com/xen0bit/veepin/internal/userdb"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/dataplane"
+	"github.com/wanan9999/veepin/internal/debuglog"
+	"github.com/wanan9999/veepin/internal/mschap"
+	"github.com/wanan9999/veepin/internal/ppp"
+	"github.com/wanan9999/veepin/internal/pqpolicy"
+	"github.com/wanan9999/veepin/internal/sstp/wire"
+	"github.com/wanan9999/veepin/internal/userdb"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // ServerConfig configures an SSTP responder and its userspace data path.

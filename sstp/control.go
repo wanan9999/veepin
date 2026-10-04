@@ -8,8 +8,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/xen0bit/veepin/internal/mschap"
-	"github.com/xen0bit/veepin/internal/sstp/wire"
+	"github.com/wanan9999/veepin/internal/mschap"
+	"github.com/wanan9999/veepin/internal/sstp/wire"
 )
 
 // sstpURI is the fixed SSTP endpoint every server exposes ([MS-SSTP] 2.2).

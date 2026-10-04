@@ -12,7 +12,7 @@ package l2tpv3
 // on which endpoint you asked; TestSecretFlagsAgreeAcrossBothTables now refuses
 // that.
 
-import "github.com/xen0bit/veepin/client"
+import "github.com/wanan9999/veepin/client"
 
 func init() {
 	client.RegisterClientOpts("l2tpv3", []client.OptSpec{

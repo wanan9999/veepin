@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/wireguard"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/wireguard"
 )
 
 const (

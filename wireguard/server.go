@@ -13,12 +13,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/dataplane"
-	"github.com/xen0bit/veepin/internal/vlog"
-	"github.com/xen0bit/veepin/internal/wireguard/noise"
-	"github.com/xen0bit/veepin/internal/wireguard/transport"
-	"github.com/xen0bit/veepin/internal/wireguard/wire"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/dataplane"
+	"github.com/wanan9999/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/wireguard/noise"
+	"github.com/wanan9999/veepin/internal/wireguard/transport"
+	"github.com/wanan9999/veepin/internal/wireguard/wire"
 )
 
 // keySize is the length of a Curve25519 key, matching what decodeKey returns.

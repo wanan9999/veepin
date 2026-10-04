@@ -11,7 +11,7 @@
 // Importing this package registers "nebula" with the client registry, so a
 // caller that dials by name only needs the blank import:
 //
-//	import _ "github.com/xen0bit/veepin/nebula"
+//	import _ "github.com/wanan9999/veepin/nebula"
 //
 //	sess, res, err := client.Dial(ctx, "nebula", opts)
 //
@@ -55,10 +55,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/dataplane"
-	inebula "github.com/xen0bit/veepin/internal/nebula"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/dataplane"
+	inebula "github.com/wanan9999/veepin/internal/nebula"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 func init() { client.Register("nebula", parseOptions) }

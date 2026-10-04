@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/client"
+	"github.com/wanan9999/veepin/client"
 )
 
 // validOptions is the minimum that gets past option parsing. The certificate

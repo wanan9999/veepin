@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/internal/vlog"
-	"github.com/xen0bit/veepin/nm/internal/nmconfig"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/nm/internal/nmconfig"
 )
 
 // newTestBus starts a private session bus and returns a server connection (for

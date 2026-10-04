@@ -9,8 +9,8 @@ import (
 	"net"
 	"sync"
 
-	"github.com/xen0bit/veepin/dataplane"
-	"github.com/xen0bit/veepin/internal/mschap"
+	"github.com/wanan9999/veepin/dataplane"
+	"github.com/wanan9999/veepin/internal/mschap"
 )
 
 // ErrAuth reports an MS-CHAPv2 exchange the peer refused: a CHAP Failure, or a

@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/wireguard/transport"
-	"github.com/xen0bit/veepin/internal/wireguard/wire"
+	"github.com/wanan9999/veepin/internal/wireguard/transport"
+	"github.com/wanan9999/veepin/internal/wireguard/wire"
 )
 
 // Rekey timing (protocol paper §6.1). A session's keys are replaced well before

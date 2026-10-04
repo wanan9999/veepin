@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/xen0bit/veepin/client"
+	"github.com/wanan9999/veepin/client"
 )
 
 // TestProtocolsAreRegistered guards a failure the compiler cannot see: the CLI

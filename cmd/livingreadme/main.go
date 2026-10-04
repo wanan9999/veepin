@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/livingreadme"
+	"github.com/wanan9999/veepin/internal/livingreadme"
 )
 
 func main() {

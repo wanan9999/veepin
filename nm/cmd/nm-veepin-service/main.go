@@ -13,30 +13,30 @@ import (
 	"os"
 
 	"github.com/godbus/dbus/v5"
-	"github.com/xen0bit/veepin/internal/vlog"
-	"github.com/xen0bit/veepin/nm/internal/dbusplugin"
+	"github.com/wanan9999/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/nm/internal/dbusplugin"
 
 	// Registers the protocols this plugin can dial with the client registry.
 	// Without the import the binary still links, and every Connect fails at
 	// runtime with "unknown protocol" — so a new protocol must be added here (and
 	// given requireKeys/secretMissing branches in internal/nmconfig). The insecure
 	// "toy" example protocol is deliberately left out.
-	_ "github.com/xen0bit/veepin/amneziawg"
-	_ "github.com/xen0bit/veepin/anyconnect"
-	_ "github.com/xen0bit/veepin/cisco"
-	_ "github.com/xen0bit/veepin/fortinet"
-	_ "github.com/xen0bit/veepin/gp"
-	_ "github.com/xen0bit/veepin/ikev2"
-	_ "github.com/xen0bit/veepin/l2tp"
-	_ "github.com/xen0bit/veepin/l2tpv3"
-	_ "github.com/xen0bit/veepin/masque"
-	_ "github.com/xen0bit/veepin/nebula"
-	_ "github.com/xen0bit/veepin/openvpn"
-	_ "github.com/xen0bit/veepin/pulse"
-	_ "github.com/xen0bit/veepin/softether"
-	_ "github.com/xen0bit/veepin/ssh"
-	_ "github.com/xen0bit/veepin/sstp"
-	_ "github.com/xen0bit/veepin/wireguard"
+	_ "github.com/wanan9999/veepin/amneziawg"
+	_ "github.com/wanan9999/veepin/anyconnect"
+	_ "github.com/wanan9999/veepin/cisco"
+	_ "github.com/wanan9999/veepin/fortinet"
+	_ "github.com/wanan9999/veepin/gp"
+	_ "github.com/wanan9999/veepin/ikev2"
+	_ "github.com/wanan9999/veepin/l2tp"
+	_ "github.com/wanan9999/veepin/l2tpv3"
+	_ "github.com/wanan9999/veepin/masque"
+	_ "github.com/wanan9999/veepin/nebula"
+	_ "github.com/wanan9999/veepin/openvpn"
+	_ "github.com/wanan9999/veepin/pulse"
+	_ "github.com/wanan9999/veepin/softether"
+	_ "github.com/wanan9999/veepin/ssh"
+	_ "github.com/wanan9999/veepin/sstp"
+	_ "github.com/wanan9999/veepin/wireguard"
 )
 
 func main() {

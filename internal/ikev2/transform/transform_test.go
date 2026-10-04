@@ -3,7 +3,7 @@ package transform
 import (
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/ikev2/payload"
+	"github.com/wanan9999/veepin/internal/ikev2/payload"
 )
 
 // TestLookupsCoverNegotiableTransforms asserts every transform ID the IKE layer

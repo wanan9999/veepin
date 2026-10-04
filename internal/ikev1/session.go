@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/cryptoutil"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/cryptoutil"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // Role selects the IKE role: the Initiator drives Main Mode and Quick Mode, the

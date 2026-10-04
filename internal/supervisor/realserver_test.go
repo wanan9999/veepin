@@ -20,12 +20,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xen0bit/veepin/dataplane"
+	"github.com/wanan9999/veepin/dataplane"
 
 	// The real registry, via the same facade import the binary uses. Without it
 	// NewServer would reject "toy" as unknown and the tests below would pass
 	// against a registry that has never heard of any protocol.
-	_ "github.com/xen0bit/veepin/toy"
+	_ "github.com/wanan9999/veepin/toy"
 )
 
 // toyListener is a listener config for the worked-example protocol: the smallest

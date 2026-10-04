@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/xen0bit/veepin/client"
+	"github.com/wanan9999/veepin/client"
 )
 
 func init() {

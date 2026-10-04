@@ -3,8 +3,8 @@ package ike
 import (
 	"net"
 
-	"github.com/xen0bit/veepin/internal/ikev2/payload"
-	"github.com/xen0bit/veepin/internal/ikev2/transform"
+	"github.com/wanan9999/veepin/internal/ikev2/payload"
+	"github.com/wanan9999/veepin/internal/ikev2/transform"
 )
 
 // handleRekeyIKE processes a CREATE_CHILD_SA that rekeys the IKE SA itself

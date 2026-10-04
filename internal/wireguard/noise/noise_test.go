@@ -6,8 +6,8 @@ import (
 	"crypto/rand"
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/cryptoutil"
-	"github.com/xen0bit/veepin/internal/wireguard/wire"
+	"github.com/wanan9999/veepin/internal/cryptoutil"
+	"github.com/wanan9999/veepin/internal/wireguard/wire"
 )
 
 // testResponder is the mirror of Initiator, written from the protocol paper

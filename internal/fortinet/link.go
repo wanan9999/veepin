@@ -16,8 +16,8 @@ import (
 	"net"
 	"sync"
 
-	"github.com/xen0bit/veepin/internal/ppp"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/ppp"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // maxInnerPacket bounds a packet read from the TUN.

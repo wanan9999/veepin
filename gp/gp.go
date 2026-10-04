@@ -25,11 +25,11 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/dataplane"
-	igp "github.com/xen0bit/veepin/internal/gp"
-	"github.com/xen0bit/veepin/internal/pqpolicy"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/dataplane"
+	igp "github.com/wanan9999/veepin/internal/gp"
+	"github.com/wanan9999/veepin/internal/pqpolicy"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 func init() { client.Register("gp", parseOptions) }

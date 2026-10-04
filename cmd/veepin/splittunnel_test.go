@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xen0bit/veepin/client"
+	"github.com/wanan9999/veepin/client"
 )
 
 // -route names what the tunnel carries, which is the thing -full-tunnel=false

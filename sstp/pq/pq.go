@@ -17,10 +17,10 @@
 package pq
 
 import (
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/internal/pqpolicy"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/internal/pqpolicy"
 
-	_ "github.com/xen0bit/veepin/sstp" // the base this varies
+	_ "github.com/wanan9999/veepin/sstp" // the base this varies
 )
 
 const (

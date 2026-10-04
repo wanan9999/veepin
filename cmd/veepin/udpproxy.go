@@ -20,8 +20,8 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/xen0bit/veepin/internal/vlog"
-	"github.com/xen0bit/veepin/masque"
+	"github.com/wanan9999/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/masque"
 )
 
 func runUDPProxy(args []string) error {

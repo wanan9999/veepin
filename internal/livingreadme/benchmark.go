@@ -23,7 +23,7 @@ type Benchmark struct {
 // tolerates the surrounding goos/goarch/cpu/PASS/ok lines and sub-benchmark
 // names.
 func ParseBenchmarks(out string) []Benchmark {
-	const modulePrefix = "github.com/xen0bit/veepin/"
+	const modulePrefix = "github.com/wanan9999/veepin/"
 	var benches []Benchmark
 	pkg := ""
 	for _, line := range strings.Split(out, "\n") {

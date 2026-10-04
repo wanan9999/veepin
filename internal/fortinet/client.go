@@ -20,9 +20,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/mschap"
-	"github.com/xen0bit/veepin/internal/ppp"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/mschap"
+	"github.com/wanan9999/veepin/internal/ppp"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // ErrAuth reports rejected credentials, so a caller can tell a bad password from

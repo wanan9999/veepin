@@ -4,8 +4,8 @@ import (
 	"net"
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/ikev2/payload"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/ikev2/payload"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // TestACFGRequestNamingOneFamilyIsAnsweredWithOnlyThatFamily is written from

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // TestClientRekeyChild is the rekey proof: a connected client negotiates a fresh

@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/cryptoutil"
-	"github.com/xen0bit/veepin/internal/ikev2/payload"
-	"github.com/xen0bit/veepin/internal/ikev2/transform"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/cryptoutil"
+	"github.com/wanan9999/veepin/internal/ikev2/payload"
+	"github.com/wanan9999/veepin/internal/ikev2/transform"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // TestEndToEndHandshake drives a full IKE_SA_INIT + IKE_AUTH exchange as an

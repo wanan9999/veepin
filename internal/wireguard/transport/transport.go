@@ -20,9 +20,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/xen0bit/veepin/dataplane"
-	"github.com/xen0bit/veepin/internal/cryptoutil"
-	"github.com/xen0bit/veepin/internal/wireguard/wire"
+	"github.com/wanan9999/veepin/dataplane"
+	"github.com/wanan9999/veepin/internal/cryptoutil"
+	"github.com/wanan9999/veepin/internal/wireguard/wire"
 )
 
 // RejectAfterMessages is the largest counter a Session will use or accept: a

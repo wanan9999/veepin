@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/wireguard/wire"
+	"github.com/wanan9999/veepin/internal/wireguard/wire"
 )
 
 // FuzzDeobfuscate feeds arbitrary datagrams to the receive path. The invariant

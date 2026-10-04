@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/dataplane"
-	"github.com/xen0bit/veepin/internal/masque/http3"
+	"github.com/wanan9999/veepin/dataplane"
+	"github.com/wanan9999/veepin/internal/masque/http3"
 	"golang.org/x/net/quic"
 )
 

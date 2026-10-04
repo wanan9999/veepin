@@ -24,20 +24,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/internal/keygen"
-	"github.com/xen0bit/veepin/internal/pqpolicy"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/internal/keygen"
+	"github.com/wanan9999/veepin/internal/pqpolicy"
 
-	_ "github.com/xen0bit/veepin/anyconnect/pq"
-	_ "github.com/xen0bit/veepin/fortinet/pq"
-	_ "github.com/xen0bit/veepin/gp/pq"
-	_ "github.com/xen0bit/veepin/ikev2/pq"
-	_ "github.com/xen0bit/veepin/masque/pq"
-	_ "github.com/xen0bit/veepin/openvpn/pq"
-	_ "github.com/xen0bit/veepin/pulse/pq"
-	_ "github.com/xen0bit/veepin/softether/pq"
-	_ "github.com/xen0bit/veepin/ssh/pq"
-	_ "github.com/xen0bit/veepin/sstp/pq"
+	_ "github.com/wanan9999/veepin/anyconnect/pq"
+	_ "github.com/wanan9999/veepin/fortinet/pq"
+	_ "github.com/wanan9999/veepin/gp/pq"
+	_ "github.com/wanan9999/veepin/ikev2/pq"
+	_ "github.com/wanan9999/veepin/masque/pq"
+	_ "github.com/wanan9999/veepin/openvpn/pq"
+	_ "github.com/wanan9999/veepin/pulse/pq"
+	_ "github.com/wanan9999/veepin/softether/pq"
+	_ "github.com/wanan9999/veepin/ssh/pq"
+	_ "github.com/wanan9999/veepin/sstp/pq"
 )
 
 // TestEveryVariantIsNamedForItsBase pins the naming convention, because the

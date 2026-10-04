@@ -23,9 +23,9 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/xen0bit/veepin/dataplane"
-	"github.com/xen0bit/veepin/internal/masque/http3"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/dataplane"
+	"github.com/wanan9999/veepin/internal/masque/http3"
+	"github.com/wanan9999/veepin/internal/vlog"
 	"golang.org/x/net/quic"
 )
 

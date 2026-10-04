@@ -20,13 +20,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/dataplane"
-	ifortinet "github.com/xen0bit/veepin/internal/fortinet"
-	"github.com/xen0bit/veepin/internal/otp"
-	"github.com/xen0bit/veepin/internal/pqpolicy"
-	"github.com/xen0bit/veepin/internal/userdb"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/dataplane"
+	ifortinet "github.com/wanan9999/veepin/internal/fortinet"
+	"github.com/wanan9999/veepin/internal/otp"
+	"github.com/wanan9999/veepin/internal/pqpolicy"
+	"github.com/wanan9999/veepin/internal/userdb"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 func init() {

@@ -3,7 +3,7 @@ package toy
 // Client option metadata for the Dial surface. TOY is deliberately insecure;
 // the secret is named and flagged so the form makes that impossible to miss.
 
-import "github.com/xen0bit/veepin/client"
+import "github.com/wanan9999/veepin/client"
 
 func init() {
 	client.RegisterClientOpts("toy", []client.OptSpec{

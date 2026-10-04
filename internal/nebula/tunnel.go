@@ -24,7 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/replay"
+	"github.com/wanan9999/veepin/internal/replay"
 )
 
 // handshakeMessageCount is the number of messages the IX pattern exchanges, and

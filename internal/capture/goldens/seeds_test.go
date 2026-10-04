@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/ikev2/payload"
+	"github.com/wanan9999/veepin/internal/ikev2/payload"
 )
 
 // seedDirs are the fuzz seed corpora grown from these captures. Go runs every

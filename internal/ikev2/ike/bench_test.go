@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/ikev2/payload"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/ikev2/payload"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // BenchmarkSKSeal measures building an encrypted (SK) IKE message: padding,

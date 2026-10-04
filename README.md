@@ -1,5 +1,10 @@
 # veepin
 
+This fork is maintained at [wanan9999/veepin](https://github.com/wanan9999/veepin),
+based on [xen0bit/veepin](https://github.com/xen0bit/veepin). Original copyright
+and the MIT license are preserved. The Go module is `github.com/wanan9999/veepin`;
+the NetworkManager module is `github.com/wanan9999/veepin/nm`.
+
 A **working userspace VPN in Go** — both server (responder) and client
 (initiator), written from scratch and depending only on the pure-Go
 `golang.org/x` modules (`x/crypto`, and `x/net` for QUIC), no cgo. It speaks
@@ -295,14 +300,20 @@ is written up in [`doc/architecture.md`](doc/architecture.md).
 
 ## Install
 
+The fork APT repository requires separate setup before using the commands below:
+replace the inherited upstream public key with your own, configure the matching
+`APT_SIGNING_KEY` secret and GitHub Pages, update the documented fingerprint,
+and set the repository variable `APT_REPO_ENABLED=true`. Until then, use this
+fork's GitHub Releases or build from source; these APT commands are setup examples.
+
 On Debian/Ubuntu — any Debian release architecture (amd64, arm64, armhf, armel,
 i386, ppc64el, riscv64, s390x) — the signed APT repository tracks the latest
 release:
 
 ```sh
-sudo curl -fsSL https://xen0bit.github.io/veepin/veepin-archive-keyring.gpg \
+sudo curl -fsSL https://wanan9999.github.io/veepin/veepin-archive-keyring.gpg \
      -o /usr/share/keyrings/veepin-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/veepin-archive-keyring.gpg] https://xen0bit.github.io/veepin stable main" \
+echo "deb [signed-by=/usr/share/keyrings/veepin-archive-keyring.gpg] https://wanan9999.github.io/veepin stable main" \
      | sudo tee /etc/apt/sources.list.d/veepin.list
 sudo apt update && sudo apt install veepin veepin-nm
 ```
@@ -321,9 +332,9 @@ repository signed by anything else:
 EE96 B9F0 28F5 7D11 5A8D  1509 889E D9E8 95D7 E72C
 ```
 
-That key replaced the previous one on 2026-09-02. If you added the repository
-before then, re-run the `curl` above; the old keyring cannot verify the current
-`InRelease`, and `apt update` will say so.
+This is the inherited **upstream** key, not a signing identity for this fork.
+It is retained for provenance and must be replaced before enabling fork APT
+publication. See the key rotation instructions in [AGENTS.md](AGENTS.md).
 
 The package ships a systemd template unit — drop arguments in
 `/etc/veepin/<name>.conf` and `systemctl enable --now veepin@<name>` (see
@@ -342,7 +353,7 @@ the artifact* rather than *who holds a key*.
 cosign verify-blob checksums.txt \
   --certificate checksums.txt.pem \
   --signature checksums.txt.sig \
-  --certificate-identity-regexp 'https://github[.]com/xen0bit/veepin/[.]github/workflows/release[.]yml@.*' \
+  --certificate-identity-regexp 'https://github[.]com/wanan9999/veepin/[.]github/workflows/release[.]yml@.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 sha256sum -c checksums.txt --ignore-missing
 ```
@@ -357,7 +368,7 @@ of this file is then something a scanner can check rather than a sentence you
 have to take on trust.
 
 `.deb`/`.rpm`/`.apk` packages and plain tarballs for every version are on
-[GitHub Releases](https://github.com/xen0bit/veepin/releases)
+[GitHub Releases](https://github.com/wanan9999/veepin/releases)
 (`apt install ./veepin_<ver>_linux_<arch>.deb` works directly).
 
 ## Build
@@ -622,7 +633,7 @@ connect` is a thin wrapper over it. Go code that knows which protocol it wants
 imports the protocol package for a typed config:
 
 ```go
-import "github.com/xen0bit/veepin/ikev2"
+import "github.com/wanan9999/veepin/ikev2"
 
 sess, res, err := ikev2.Dial(ctx, ikev2.Config{
     Server: "vpn.example.com", PSK: "…", LocalID: "client.example.com",
@@ -636,8 +647,8 @@ settings dictionary) dial by name, selecting protocols by importing them:
 
 ```go
 import (
-    "github.com/xen0bit/veepin/client"
-    _ "github.com/xen0bit/veepin/ikev2" // registers "ikev2"
+    "github.com/wanan9999/veepin/client"
+    _ "github.com/wanan9999/veepin/ikev2" // registers "ikev2"
 )
 
 sess, res, err := client.Dial(ctx, "ikev2", map[string]string{

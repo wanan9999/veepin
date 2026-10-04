@@ -21,7 +21,7 @@ import (
 	"encoding/binary"
 	"math/big"
 
-	"github.com/xen0bit/veepin/internal/wireguard/wire"
+	"github.com/wanan9999/veepin/internal/wireguard/wire"
 )
 
 // ObfuscationConfig parameterises the AmneziaWG wire format. The zero value is

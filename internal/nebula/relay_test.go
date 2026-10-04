@@ -7,7 +7,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/replay"
+	"github.com/wanan9999/veepin/internal/replay"
 )
 
 func addr(s string) netip.Addr { return netip.MustParseAddr(s) }

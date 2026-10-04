@@ -40,7 +40,7 @@ failure tells you which:
   because it exercises the dual-stack path.
 
 ```sh
-git clone https://github.com/xen0bit/veepin && cd veepin
+git clone https://github.com/wanan9999/veepin && cd veepin
 go build -o veepin ./cmd/veepin
 ```
 

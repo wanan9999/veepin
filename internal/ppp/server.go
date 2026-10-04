@@ -7,7 +7,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/xen0bit/veepin/internal/mschap"
+	"github.com/wanan9999/veepin/internal/mschap"
 )
 
 // Authenticator returns the password for a username, or ok=false if unknown. The

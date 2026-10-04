@@ -25,9 +25,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/internal/confstore"
-	"github.com/xen0bit/veepin/internal/profile"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/internal/confstore"
+	"github.com/wanan9999/veepin/internal/profile"
 )
 
 func runProfile(args []string) error {

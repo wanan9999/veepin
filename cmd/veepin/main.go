@@ -34,7 +34,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/xen0bit/veepin/client"
+	"github.com/wanan9999/veepin/client"
 
 	// Registers the protocols with the client registry, and with it their
 	// OptSpec tables -- which, since the flag set is generated from those
@@ -44,36 +44,36 @@ import (
 	// docs_test.go reaches the registry through these same imports: forget one
 	// and the protocol-count check passes against a registry that has not heard
 	// of your protocol, so add the import first.
-	_ "github.com/xen0bit/veepin/amneziawg"
-	_ "github.com/xen0bit/veepin/anyconnect"
-	_ "github.com/xen0bit/veepin/cisco"
-	_ "github.com/xen0bit/veepin/fortinet"
-	_ "github.com/xen0bit/veepin/gp"
-	_ "github.com/xen0bit/veepin/ikev2"
-	_ "github.com/xen0bit/veepin/l2tp"
-	_ "github.com/xen0bit/veepin/l2tpv3"
-	_ "github.com/xen0bit/veepin/masque"
-	_ "github.com/xen0bit/veepin/nebula"
-	_ "github.com/xen0bit/veepin/openvpn"
-	_ "github.com/xen0bit/veepin/pulse"
-	_ "github.com/xen0bit/veepin/softether"
-	_ "github.com/xen0bit/veepin/ssh"
-	_ "github.com/xen0bit/veepin/sstp"
-	_ "github.com/xen0bit/veepin/toy"
-	_ "github.com/xen0bit/veepin/wireguard"
+	_ "github.com/wanan9999/veepin/amneziawg"
+	_ "github.com/wanan9999/veepin/anyconnect"
+	_ "github.com/wanan9999/veepin/cisco"
+	_ "github.com/wanan9999/veepin/fortinet"
+	_ "github.com/wanan9999/veepin/gp"
+	_ "github.com/wanan9999/veepin/ikev2"
+	_ "github.com/wanan9999/veepin/l2tp"
+	_ "github.com/wanan9999/veepin/l2tpv3"
+	_ "github.com/wanan9999/veepin/masque"
+	_ "github.com/wanan9999/veepin/nebula"
+	_ "github.com/wanan9999/veepin/openvpn"
+	_ "github.com/wanan9999/veepin/pulse"
+	_ "github.com/wanan9999/veepin/softether"
+	_ "github.com/wanan9999/veepin/ssh"
+	_ "github.com/wanan9999/veepin/sstp"
+	_ "github.com/wanan9999/veepin/toy"
+	_ "github.com/wanan9999/veepin/wireguard"
 
 	// The pq- variants: a second registry name per protocol under which the
 	// post-quantum contract is mandatory. See doc/pq-variants-plan.md.
-	_ "github.com/xen0bit/veepin/anyconnect/pq"
-	_ "github.com/xen0bit/veepin/fortinet/pq"
-	_ "github.com/xen0bit/veepin/gp/pq"
-	_ "github.com/xen0bit/veepin/ikev2/pq"
-	_ "github.com/xen0bit/veepin/masque/pq"
-	_ "github.com/xen0bit/veepin/openvpn/pq"
-	_ "github.com/xen0bit/veepin/pulse/pq"
-	_ "github.com/xen0bit/veepin/softether/pq"
-	_ "github.com/xen0bit/veepin/ssh/pq"
-	_ "github.com/xen0bit/veepin/sstp/pq"
+	_ "github.com/wanan9999/veepin/anyconnect/pq"
+	_ "github.com/wanan9999/veepin/fortinet/pq"
+	_ "github.com/wanan9999/veepin/gp/pq"
+	_ "github.com/wanan9999/veepin/ikev2/pq"
+	_ "github.com/wanan9999/veepin/masque/pq"
+	_ "github.com/wanan9999/veepin/openvpn/pq"
+	_ "github.com/wanan9999/veepin/pulse/pq"
+	_ "github.com/wanan9999/veepin/softether/pq"
+	_ "github.com/wanan9999/veepin/ssh/pq"
+	_ "github.com/wanan9999/veepin/sstp/pq"
 )
 
 // Build metadata, stamped via -ldflags at release time (see .goreleaser.yaml).

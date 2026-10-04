@@ -20,9 +20,9 @@ import (
 	"os"
 	"slices"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/internal/confstore"
-	"github.com/xen0bit/veepin/internal/profile"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/internal/confstore"
+	"github.com/wanan9999/veepin/internal/profile"
 )
 
 // profileStore is the on-disk profile directory the endpoints read and write.

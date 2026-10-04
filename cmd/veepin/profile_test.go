@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/internal/profile"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/internal/profile"
 )
 
 func TestProfileAddAndList(t *testing.T) {

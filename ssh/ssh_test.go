@@ -11,7 +11,7 @@ import (
 
 	cryptossh "golang.org/x/crypto/ssh"
 
-	"github.com/xen0bit/veepin/client"
+	"github.com/wanan9999/veepin/client"
 )
 
 func TestParseCIDR(t *testing.T) {

@@ -3,7 +3,7 @@
 //
 // Importing this package registers "sstp" with the client registry:
 //
-//	import _ "github.com/xen0bit/veepin/sstp"
+//	import _ "github.com/wanan9999/veepin/sstp"
 //	sess, res, err := client.Dial(ctx, "sstp", opts)
 package sstp
 
@@ -18,14 +18,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/dataplane"
-	"github.com/xen0bit/veepin/internal/debuglog"
-	"github.com/xen0bit/veepin/internal/mschap"
-	ppp "github.com/xen0bit/veepin/internal/ppp"
-	"github.com/xen0bit/veepin/internal/pqpolicy"
-	"github.com/xen0bit/veepin/internal/sstp/wire"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/dataplane"
+	"github.com/wanan9999/veepin/internal/debuglog"
+	"github.com/wanan9999/veepin/internal/mschap"
+	ppp "github.com/wanan9999/veepin/internal/ppp"
+	"github.com/wanan9999/veepin/internal/pqpolicy"
+	"github.com/wanan9999/veepin/internal/sstp/wire"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 func init() { client.Register("sstp", parseOptions) }

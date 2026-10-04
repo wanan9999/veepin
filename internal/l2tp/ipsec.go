@@ -3,8 +3,8 @@ package l2tp
 import (
 	"encoding/binary"
 
-	"github.com/xen0bit/veepin/internal/ikev1"
-	"github.com/xen0bit/veepin/internal/ikev2/esp"
+	"github.com/wanan9999/veepin/internal/ikev1"
+	"github.com/wanan9999/veepin/internal/ikev2/esp"
 )
 
 // The IPsec layer under L2TP is ESP in transport mode: it protects the UDP/1701

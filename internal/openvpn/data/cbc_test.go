@@ -8,7 +8,7 @@ import (
 	"hash"
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/openvpn/keys"
+	"github.com/wanan9999/veepin/internal/openvpn/keys"
 )
 
 // cbcPair builds a client and server CBCCipher with crossed keys, so packets one

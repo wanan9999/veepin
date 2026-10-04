@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/nm/internal/nmconfig"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/nm/internal/nmconfig"
 )
 
 // registered reports whether name is in the client registry (i.e. its package
@@ -39,7 +39,7 @@ func TestAllSupportedProtocolsRegistered(t *testing.T) {
 	for _, name := range nmconfig.SupportedProtocols {
 		if !registered(name) {
 			t.Errorf("nmconfig supports %q but its package is not blank-imported by the service; "+
-				"add `_ \"github.com/xen0bit/veepin/%s\"` to main.go", name, name)
+				"add `_ \"github.com/wanan9999/veepin/%s\"` to main.go", name, name)
 		}
 	}
 

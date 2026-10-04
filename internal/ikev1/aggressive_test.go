@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // pair wires two sessions to each other over in-memory "sockets", so a whole

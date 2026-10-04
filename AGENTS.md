@@ -16,6 +16,16 @@ from. Read it as three constraints:
   agree with each other, which is not the same as being right. See
   [The interop matrix earns its keep](#the-interop-matrix-earns-its-keep).
 
+## Fork identity
+
+Use `github.com/wanan9999/veepin` for the root module and
+`github.com/wanan9999/veepin/nm` for the nested module. Update imports and
+release metadata together; preserve upstream attribution and LICENSE.
+APT publishing is opt-in via `APT_REPO_ENABLED=true`: first replace the
+inherited upstream public key, provision the matching `APT_SIGNING_KEY`,
+update fingerprints, and configure Pages. Never reuse an upstream key identity
+as proof that this fork can sign releases.
+
 ## Orientation
 
 ```
@@ -349,7 +359,7 @@ personal email.
 export GNUPGHOME=$(mktemp -d)   # a scratch keyring: one key in it, so the
 chmod 700 "$GNUPGHOME"          # bare exports below are unambiguous
 gpg --batch --passphrase '' --quick-generate-key \
-  'veepin APT repository (release signing) <21974988+xen0bit@users.noreply.github.com>' \
+  'veepin APT repository (release signing) <wanan9999@users.noreply.github.com>' \
   ed25519 sign never
 gpg --armor --export             > packaging/apt-signing-key.asc
 gpg --armor --export-secret-keys | gh secret set APT_SIGNING_KEY

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/wireguard/noise"
+	"github.com/wanan9999/veepin/internal/wireguard/noise"
 )
 
 // TestClientRekeyDispatch drives the rekey handshake path. Unlike the initial

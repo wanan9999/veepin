@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xen0bit/veepin/client"
+	"github.com/wanan9999/veepin/client"
 )
 
 // mgmtHTTPTimeout bounds every request the management CLI makes. The API's

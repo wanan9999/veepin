@@ -19,11 +19,11 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/dataplane"
-	imasque "github.com/xen0bit/veepin/internal/masque"
-	"github.com/xen0bit/veepin/internal/pqpolicy"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/dataplane"
+	imasque "github.com/wanan9999/veepin/internal/masque"
+	"github.com/wanan9999/veepin/internal/pqpolicy"
+	"github.com/wanan9999/veepin/internal/vlog"
 	"golang.org/x/net/quic"
 )
 

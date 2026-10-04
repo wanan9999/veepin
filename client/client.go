@@ -18,7 +18,7 @@
 // Protocols register themselves in an init function, so a caller selects the
 // protocols it can dial by importing them:
 //
-//	import _ "github.com/xen0bit/veepin/ikev2"
+//	import _ "github.com/wanan9999/veepin/ikev2"
 //
 // The server side mirrors this exactly (see server.go): a protocol that can act
 // as a responder registers with RegisterServer and is built by NewServer, so the

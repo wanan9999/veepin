@@ -4,7 +4,7 @@ package nebula
 // identity come from the certificate its CA signed, so there is no address or
 // user option; the CA bundle, certificate and private key are the minimum.
 
-import "github.com/xen0bit/veepin/client"
+import "github.com/wanan9999/veepin/client"
 
 func init() {
 	client.RegisterClientOpts("nebula", []client.OptSpec{

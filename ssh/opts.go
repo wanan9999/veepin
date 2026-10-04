@@ -3,7 +3,7 @@ package ssh
 // Client option metadata for the Dial surface. An identity-key file is an
 // alternative to a password, mirroring the NetworkManager plugin's handling.
 
-import "github.com/xen0bit/veepin/client"
+import "github.com/wanan9999/veepin/client"
 
 func init() {
 	client.RegisterClientOpts("ssh", []client.OptSpec{

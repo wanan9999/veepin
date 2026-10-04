@@ -10,7 +10,7 @@ platform: linux
 version: @VERSION@
 section: net
 priority: optional
-maintainer: Remy <21974988+xen0bit@users.noreply.github.com>
+maintainer: wanan9999 <wanan9999@users.noreply.github.com>
 description: |
   NetworkManager VPN plugins for veepin.
   Adds one VPN type per veepin protocol — IKEv2, WireGuard, OpenVPN, SSTP, SSH,
@@ -18,7 +18,7 @@ description: |
   in the "Add VPN" list, backed by a shared D-Bus service that drives the veepin
   client plus a GTK editor per protocol. No dependency on strongSwan.
 vendor: veepin
-homepage: https://github.com/xen0bit/veepin
+homepage: https://github.com/wanan9999/veepin
 license: MIT
 
 depends:

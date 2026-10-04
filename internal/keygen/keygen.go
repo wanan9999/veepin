@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/xen0bit/veepin/internal/confstore"
+	"github.com/wanan9999/veepin/internal/confstore"
 )
 
 // Generate creates key material for a protocol option declared with `Generate` on

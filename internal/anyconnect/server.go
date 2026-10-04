@@ -15,10 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xen0bit/veepin/dataplane"
-	"github.com/xen0bit/veepin/internal/dtls"
-	"github.com/xen0bit/veepin/internal/userdb"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/dataplane"
+	"github.com/wanan9999/veepin/internal/dtls"
+	"github.com/wanan9999/veepin/internal/userdb"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // handshakeTimeout bounds the HTTP authentication and CONNECT exchange. Once the

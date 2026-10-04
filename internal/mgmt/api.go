@@ -41,12 +41,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/internal/confstore"
-	"github.com/xen0bit/veepin/internal/keygen"
-	"github.com/xen0bit/veepin/internal/supervisor"
-	"github.com/xen0bit/veepin/internal/vlog"
-	"github.com/xen0bit/veepin/wireguard"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/internal/confstore"
+	"github.com/wanan9999/veepin/internal/keygen"
+	"github.com/wanan9999/veepin/internal/supervisor"
+	"github.com/wanan9999/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/wireguard"
 )
 
 // redacted is the package-local spelling of client.Redacted, used often enough

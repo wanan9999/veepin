@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/wireguard/wire"
+	"github.com/wanan9999/veepin/internal/wireguard/wire"
 )
 
 // awgTestConfig is a representative AmneziaWG parameter set: every message kind

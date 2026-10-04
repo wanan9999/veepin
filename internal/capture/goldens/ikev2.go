@@ -19,8 +19,8 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/xen0bit/veepin/internal/capture"
-	"github.com/xen0bit/veepin/internal/ikev2/payload"
+	"github.com/wanan9999/veepin/internal/capture"
+	"github.com/wanan9999/veepin/internal/ikev2/payload"
 )
 
 // The two UDP ports IKE lives on, and the four-octet zero prefix that

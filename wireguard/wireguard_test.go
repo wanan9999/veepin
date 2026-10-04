@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/vlog"
-	"github.com/xen0bit/veepin/internal/wireguard/noise"
-	"github.com/xen0bit/veepin/internal/wireguard/wire"
+	"github.com/wanan9999/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/wireguard/noise"
+	"github.com/wanan9999/veepin/internal/wireguard/wire"
 )
 
 // testNoiseCfg is a self-consistent handshake config: a real keypair so

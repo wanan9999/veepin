@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/internal/supervisor"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/internal/supervisor"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // metricsServer builds an API over one running wireguard listener with the

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/internal/openvpn/keys"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/internal/openvpn/keys"
 )
 
 func TestParseConfigInlineAndDirectives(t *testing.T) {

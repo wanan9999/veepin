@@ -14,8 +14,8 @@ Docker, no network and no root.
 
 ```
 $ go test ./internal/capture/...
-ok  	github.com/xen0bit/veepin/internal/capture         0.005s
-ok  	github.com/xen0bit/veepin/internal/capture/goldens 0.004s
+ok  	github.com/wanan9999/veepin/internal/capture         0.005s
+ok  	github.com/wanan9999/veepin/internal/capture/goldens 0.004s
 ```
 
 ## The one thing this must not be allowed to become

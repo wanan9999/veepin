@@ -3,8 +3,8 @@ package toy
 import (
 	"testing"
 
-	"github.com/xen0bit/veepin/dataplane"
-	itoy "github.com/xen0bit/veepin/internal/toy"
+	"github.com/wanan9999/veepin/dataplane"
+	itoy "github.com/wanan9999/veepin/internal/toy"
 )
 
 // TOY's MTU is derived from its own wire format, so the arithmetic is checked

@@ -22,8 +22,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/openvpn/reliable"
-	"github.com/xen0bit/veepin/internal/openvpn/wire"
+	"github.com/wanan9999/veepin/internal/openvpn/reliable"
+	"github.com/wanan9999/veepin/internal/openvpn/wire"
 )
 
 const (

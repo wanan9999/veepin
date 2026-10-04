@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/otp"
+	"github.com/wanan9999/veepin/internal/otp"
 )
 
 // The shared secret these tests authenticate with, base32 as a user would paste

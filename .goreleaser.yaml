@@ -76,8 +76,8 @@ nfpms:
     package_name: veepin
     ids: [veepin]
     vendor: veepin
-    homepage: https://github.com/xen0bit/veepin
-    maintainer: Remy <21974988+xen0bit@users.noreply.github.com>
+    homepage: https://github.com/wanan9999/veepin
+    maintainer: wanan9999 <wanan9999@users.noreply.github.com>
     description: |-
       Pure-Go userspace VPN — server (responder) and client (initiator).
       `veepin connect` / `veepin serve` speak IKEv2: the full RFC 7296 handshake
@@ -190,7 +190,7 @@ changelog:
 
 release:
   github:
-    owner: xen0bit
+    owner: wanan9999
     name: veepin
   draft: false
   prerelease: auto

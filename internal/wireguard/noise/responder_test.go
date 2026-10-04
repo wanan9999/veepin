@@ -3,7 +3,7 @@ package noise
 import (
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/wireguard/wire"
+	"github.com/wanan9999/veepin/internal/wireguard/wire"
 )
 
 // handshake runs a full Initiator <-> Responder exchange with the real types on

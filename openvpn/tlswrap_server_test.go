@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/openvpn/tlswrap"
-	"github.com/xen0bit/veepin/internal/openvpn/wire"
+	"github.com/wanan9999/veepin/internal/openvpn/tlswrap"
+	"github.com/wanan9999/veepin/internal/openvpn/wire"
 )
 
 // staticKeyPEM builds a deterministic OpenVPN static key file, so both sides of

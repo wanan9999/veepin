@@ -9,7 +9,7 @@
 
 [Unit]
 Description=veepin VPN server (%i)
-Documentation=https://github.com/xen0bit/veepin
+Documentation=https://github.com/wanan9999/veepin
 After=network-online.target
 Wants=network-online.target
 

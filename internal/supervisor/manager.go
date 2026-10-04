@@ -23,9 +23,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/internal/hostnet"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/internal/hostnet"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // Constructor turns a ListenerConfig into a constructed (not yet listening)

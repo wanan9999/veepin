@@ -20,9 +20,9 @@ import (
 	"net"
 	"strconv"
 
-	imasque "github.com/xen0bit/veepin/internal/masque"
-	"github.com/xen0bit/veepin/internal/pqpolicy"
-	"github.com/xen0bit/veepin/internal/vlog"
+	imasque "github.com/wanan9999/veepin/internal/masque"
+	"github.com/wanan9999/veepin/internal/pqpolicy"
+	"github.com/wanan9999/veepin/internal/vlog"
 	"golang.org/x/net/quic"
 )
 

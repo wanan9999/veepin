@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/debuglog"
+	"github.com/wanan9999/veepin/internal/debuglog"
 )
 
 // The default output is byte-for-byte what it was. A slog TextHandler would

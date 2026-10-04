@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/xen0bit/veepin/internal/capture"
+	"github.com/wanan9999/veepin/internal/capture"
 )
 
 //go:embed corpora/*.corpus

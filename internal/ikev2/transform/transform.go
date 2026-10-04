@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/xen0bit/veepin/internal/cryptoutil"
-	"github.com/xen0bit/veepin/internal/ikev2/payload"
+	"github.com/wanan9999/veepin/internal/cryptoutil"
+	"github.com/wanan9999/veepin/internal/ikev2/payload"
 )
 
 // Cipher returns the SK (handshake) cipher for an ENCR transform ID and key

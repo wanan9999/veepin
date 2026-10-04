@@ -136,7 +136,7 @@ D-Bus shell around existing code:
 - **D1 — Public client facade.** Promote the handshake+datapath wiring currently
   inlined in `cmd/ikev2/main.go` into a small **public** package so external code
   can drive a session without reaching into `internal/`. Proposed
-  `client` package (`github.com/xen0bit/veepin/client`) exposing:
+  `client` package (`github.com/wanan9999/veepin/client`) exposing:
 
   ```go
   type Config struct {
@@ -179,13 +179,13 @@ libnm pieces. This is the mechanism that *structurally* guarantees constraints
 
 ```
 veepin/                      # ROOT MODULE — zero deps, CGO_ENABLED=0
-├── go.mod                    #   github.com/xen0bit/veepin   (unchanged: stdlib only)
+├── go.mod                    #   github.com/wanan9999/veepin   (unchanged: stdlib only)
 ├── client/                   #   NEW public facade (D1) — CGO-free, no deps
 ├── cmd/{ikev2d,ikev2,testclient}
 ├── internal/...
 └── nm/                       # NESTED MODULE — may use deps + CGO/C
-    ├── go.mod                #   github.com/xen0bit/veepin/nm
-    │                         #   require github.com/xen0bit/veepin  (+ replace ../)
+    ├── go.mod                #   github.com/wanan9999/veepin/nm
+    │                         #   require github.com/wanan9999/veepin  (+ replace ../)
     │                         #   require github.com/godbus/dbus/v5
     ├── cmd/
     │   └── nm-veepin-service/   # the D-Bus VPN daemon (Go + godbus, CGO-free)
@@ -212,7 +212,7 @@ veepin/                      # ROOT MODULE — zero deps, CGO_ENABLED=0
 - The root `go.mod` stays byte-for-byte dependency-free; only `nm/go.mod` lists
   godbus.
 - The nested module imports the core via
-  `require github.com/xen0bit/veepin v0.0.0` + `replace github.com/xen0bit/veepin => ../`.
+  `require github.com/wanan9999/veepin v0.0.0` + `replace github.com/wanan9999/veepin => ../`.
   It imports the **public** `client` package (D1), not `internal/` — clean across
   the module boundary and not reliant on the `internal` path exemption.
 
@@ -607,7 +607,7 @@ budget is spent solely in Phase 2 on the one artifact NM's design forces into C.
 | Piece | Location | Notes |
 |-------|----------|-------|
 | Public client facade | `client/` (root module) | `Dial`/`Session`/`Result`; CGO-free, no deps; `cmd/ikev2` refactored onto it |
-| Nested plugin module | `nm/go.mod` | `github.com/xen0bit/veepin/nm`; the **only** module that uses godbus |
+| Nested plugin module | `nm/go.mod` | `github.com/wanan9999/veepin/nm`; the **only** module that uses godbus |
 | Connection-dict mapping | `nm/internal/nmconfig` | bus-free, unit-tested |
 | D-Bus VPN service | `nm/internal/dbusplugin`, `nm/cmd/nm-veepin-service` | implements `VPN.Plugin`; integration-tested on a private bus |
 | `.name` descriptor + D-Bus policy | `nm/data/` | references the editor `.so` |

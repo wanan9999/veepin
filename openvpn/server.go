@@ -16,15 +16,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/dataplane"
-	"github.com/xen0bit/veepin/internal/openvpn/control"
-	"github.com/xen0bit/veepin/internal/openvpn/data"
-	"github.com/xen0bit/veepin/internal/openvpn/keys"
-	"github.com/xen0bit/veepin/internal/openvpn/tlswrap"
-	"github.com/xen0bit/veepin/internal/openvpn/wire"
-	"github.com/xen0bit/veepin/internal/pqpolicy"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/dataplane"
+	"github.com/wanan9999/veepin/internal/openvpn/control"
+	"github.com/wanan9999/veepin/internal/openvpn/data"
+	"github.com/wanan9999/veepin/internal/openvpn/keys"
+	"github.com/wanan9999/veepin/internal/openvpn/tlswrap"
+	"github.com/wanan9999/veepin/internal/openvpn/wire"
+	"github.com/wanan9999/veepin/internal/pqpolicy"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // ServerConfig configures an OpenVPN responder and its userspace data path. It

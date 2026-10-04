@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/client"
+	"github.com/wanan9999/veepin/client"
 )
 
 func testRand() *rand.Rand { return rand.New(rand.NewPCG(1, 2)) }

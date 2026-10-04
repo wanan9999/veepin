@@ -257,6 +257,8 @@ jobs:
   # GitHub Releases). Needs the APT_SIGNING_KEY secret (armored GPG private
   # key) and Pages enabled; configure-pages creates the site on first run.
   apt-repo:
+    # Forks must provision their own signing key and Pages before publishing.
+    if: ${{ vars.APT_REPO_ENABLED == 'true' }}
     needs: [goreleaser, nm-packages, nm-cross-upload]
     runs-on: ubuntu-latest
     permissions:

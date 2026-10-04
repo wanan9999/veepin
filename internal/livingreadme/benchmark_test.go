@@ -7,15 +7,15 @@ import (
 
 const sampleBenchOut = `goos: linux
 goarch: amd64
-pkg: github.com/xen0bit/veepin/internal/ikev2/esp
+pkg: github.com/wanan9999/veepin/internal/ikev2/esp
 cpu: Intel(R) Xeon(R)
 BenchmarkEncap/1400-8   	  512345	      1640 ns/op	 853.66 MB/s	     512 B/op	       2 allocs/op
 BenchmarkDecap/1400-8   	  700000	      1230 ns/op	1138.21 MB/s	     256 B/op	       1 allocs/op
 PASS
-ok  	github.com/xen0bit/veepin/internal/ikev2/esp	2.100s
-pkg: github.com/xen0bit/veepin/internal/nebula
+ok  	github.com/wanan9999/veepin/internal/ikev2/esp	2.100s
+pkg: github.com/wanan9999/veepin/internal/nebula
 BenchmarkAESGCMEncrypt/64-8   	 2000000	       320.0 ns/op	     0 B/op	       1 allocs/op
-ok  	github.com/xen0bit/veepin/internal/nebula	1.000s
+ok  	github.com/wanan9999/veepin/internal/nebula	1.000s
 `
 
 func TestParseBenchmarks(t *testing.T) {

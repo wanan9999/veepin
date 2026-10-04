@@ -3,7 +3,7 @@ package transport
 import (
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/wireguard/wire"
+	"github.com/wanan9999/veepin/internal/wireguard/wire"
 )
 
 func sizeName(n int) string {

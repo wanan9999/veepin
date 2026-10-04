@@ -8,7 +8,7 @@
 // returns the negotiated Result for the caller to apply. Importing this package
 // registers "l2tp" with the client registry:
 //
-//	import _ "github.com/xen0bit/veepin/l2tp"
+//	import _ "github.com/wanan9999/veepin/l2tp"
 //	sess, res, err := client.Dial(ctx, "l2tp", opts)
 //
 // The exchange machinery lives in internal/ikev1 (IKE), internal/l2tp (L2TP) and
@@ -24,12 +24,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/dataplane"
-	"github.com/xen0bit/veepin/internal/ikev1"
-	engine "github.com/xen0bit/veepin/internal/l2tp"
-	"github.com/xen0bit/veepin/internal/ppp"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/dataplane"
+	"github.com/wanan9999/veepin/internal/ikev1"
+	engine "github.com/wanan9999/veepin/internal/l2tp"
+	"github.com/wanan9999/veepin/internal/ppp"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 func init() { client.Register("l2tp", parseOptions) }

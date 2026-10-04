@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/ikev2/payload"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/ikev2/payload"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // capturingDataPath records Child SA lifecycle and MOBIKE peer-address updates,

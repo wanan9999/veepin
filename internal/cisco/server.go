@@ -22,10 +22,10 @@ import (
 	"net/netip"
 	"sync"
 
-	"github.com/xen0bit/veepin/dataplane"
-	"github.com/xen0bit/veepin/internal/ikev1"
-	"github.com/xen0bit/veepin/internal/userdb"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/dataplane"
+	"github.com/wanan9999/veepin/internal/ikev1"
+	"github.com/wanan9999/veepin/internal/userdb"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // ServerConfig configures the gateway.

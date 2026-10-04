@@ -1,6 +1,6 @@
 package masque
 
-import "github.com/xen0bit/veepin/internal/masque/http3"
+import "github.com/wanan9999/veepin/internal/masque/http3"
 
 // connect-ip is the :protocol token that turns an Extended CONNECT into an IP
 // tunnel (RFC 9484 §3).

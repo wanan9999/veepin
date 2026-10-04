@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/xen0bit/veepin/internal/debuglog"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/debuglog"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // Logging: one level and one shape, on log/slog.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/replay"
+	"github.com/wanan9999/veepin/internal/replay"
 )
 
 // benchTunnel builds a tunnel whose send and receive keys are the same, so a

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/ikev2/esp"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/ikev2/esp"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // startTestServer spins up a real server on loopback and returns its ports.

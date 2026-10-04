@@ -22,13 +22,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xen0bit/veepin/dataplane"
-	"github.com/xen0bit/veepin/internal/mschap"
-	"github.com/xen0bit/veepin/internal/otp"
-	"github.com/xen0bit/veepin/internal/ppp"
-	"github.com/xen0bit/veepin/internal/udpmux"
-	"github.com/xen0bit/veepin/internal/userdb"
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/dataplane"
+	"github.com/wanan9999/veepin/internal/mschap"
+	"github.com/wanan9999/veepin/internal/otp"
+	"github.com/wanan9999/veepin/internal/ppp"
+	"github.com/wanan9999/veepin/internal/udpmux"
+	"github.com/wanan9999/veepin/internal/userdb"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 // ServerConfig configures a Fortinet SSL VPN server.

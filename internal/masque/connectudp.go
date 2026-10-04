@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/xen0bit/veepin/internal/masque/http3"
+	"github.com/wanan9999/veepin/internal/masque/http3"
 )
 
 // connectUDPProtocol is the :protocol token that turns an Extended CONNECT into

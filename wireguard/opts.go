@@ -5,7 +5,7 @@ package wireguard
 // cannot start without, with a wg-quick -config file excusing the individual
 // keys. Secret mirrors secretMissing.
 
-import "github.com/xen0bit/veepin/client"
+import "github.com/wanan9999/veepin/client"
 
 func init() {
 	client.RegisterClientOpts("wireguard", []client.OptSpec{

@@ -28,7 +28,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xen0bit/veepin/client"
+	"github.com/wanan9999/veepin/client"
 )
 
 // noCredentialJudged names the protocols whose Dial declares a Secret option and

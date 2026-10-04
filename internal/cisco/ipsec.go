@@ -16,8 +16,8 @@ import (
 	"net"
 	"net/netip"
 
-	"github.com/xen0bit/veepin/internal/ikev1"
-	"github.com/xen0bit/veepin/internal/ikev2/esp"
+	"github.com/wanan9999/veepin/internal/ikev1"
+	"github.com/wanan9999/veepin/internal/ikev2/esp"
 )
 
 const (

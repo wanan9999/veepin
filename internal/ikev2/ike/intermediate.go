@@ -26,8 +26,8 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/xen0bit/veepin/internal/cryptoutil"
-	"github.com/xen0bit/veepin/internal/ikev2/payload"
+	"github.com/wanan9999/veepin/internal/cryptoutil"
+	"github.com/wanan9999/veepin/internal/ikev2/payload"
 )
 
 // intAuthBlob returns IntAuth_[i/r]*A | IntAuth_[i/r]*P for one IKE_INTERMEDIATE

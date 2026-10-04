@@ -1,4 +1,4 @@
-module github.com/xen0bit/veepin
+module github.com/wanan9999/veepin
 
 go 1.27.0
 

@@ -42,7 +42,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/client"
+	"github.com/wanan9999/veepin/client"
 )
 
 // TestServeFlagsCoverRegisteredServerProtocols is the serve-side mirror of

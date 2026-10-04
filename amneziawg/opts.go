@@ -4,7 +4,7 @@ package amneziawg
 // not negotiated: both ends must be given identical values, exactly like a
 // pre-shared key. The tunnel flags mirror the wireguard case.
 
-import "github.com/xen0bit/veepin/client"
+import "github.com/wanan9999/veepin/client"
 
 func init() {
 	client.RegisterClientOpts("amneziawg", []client.OptSpec{

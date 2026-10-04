@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/mschap"
+	"github.com/wanan9999/veepin/internal/mschap"
 )
 
 // transportFunc adapts a function to the Transport interface.

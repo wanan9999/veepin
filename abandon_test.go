@@ -24,7 +24,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xen0bit/veepin/client"
+	"github.com/wanan9999/veepin/client"
 )
 
 // serverIsAnotherFacades names protocols whose registered server is not a type

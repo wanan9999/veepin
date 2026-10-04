@@ -96,23 +96,22 @@ cat > index.html <<'HTML'
 <title>veepin APT repository</title>
 <style>body{font-family:monospace;max-width:48rem;margin:3rem auto;padding:0 1rem}pre{background:#8882;padding:1rem;overflow-x:auto}</style>
 <h1>veepin APT repository</h1>
-<p>Signed repository carrying the latest <a href="https://github.com/xen0bit/veepin">veepin</a>
+<p>Signed repository carrying the latest <a href="https://github.com/wanan9999/veepin">veepin</a>
 release for Debian/Ubuntu on every Debian release architecture (amd64, arm64,
 armhf, armel, i386, ppc64el, riscv64, s390x). Older versions live on
-<a href="https://github.com/xen0bit/veepin/releases">GitHub Releases</a>.</p>
+<a href="https://github.com/wanan9999/veepin/releases">GitHub Releases</a>.</p>
 <pre>
-sudo curl -fsSL https://xen0bit.github.io/veepin/veepin-archive-keyring.gpg \
+sudo curl -fsSL https://wanan9999.github.io/veepin/veepin-archive-keyring.gpg \
      -o /usr/share/keyrings/veepin-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/veepin-archive-keyring.gpg] https://xen0bit.github.io/veepin stable main" \
+echo "deb [signed-by=/usr/share/keyrings/veepin-archive-keyring.gpg] https://wanan9999.github.io/veepin stable main" \
      | sudo tee /etc/apt/sources.list.d/veepin.list
 sudo apt update
 sudo apt install veepin veepin-nm
 </pre>
 <p>The keyring holds one key, fingerprint
-<code>EE96 B9F0 28F5 7D11 5A8D  1509 889E D9E8 95D7 E72C</code>, which replaced
-the previous signing key on 2026-09-02. If you added this repository before
-then, re-fetch the keyring with the command above — the old one cannot verify
-the current <code>InRelease</code>, and <code>apt update</code> will say so.</p>
+<code>EE96 B9F0 28F5 7D11 5A8D  1509 889E D9E8 95D7 E72C</code>.
+This inherited upstream fingerprint must be replaced with the fork signing
+key fingerprint before enabling APT publication.</p>
 HTML
 
 echo "build-apt-repo: repository built in $out_dir"

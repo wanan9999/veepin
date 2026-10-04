@@ -37,11 +37,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/internal/keygen"
-	"github.com/xen0bit/veepin/internal/profile"
-	"github.com/xen0bit/veepin/internal/supervisor"
-	"github.com/xen0bit/veepin/wireguard"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/internal/keygen"
+	"github.com/wanan9999/veepin/internal/profile"
+	"github.com/wanan9999/veepin/internal/supervisor"
+	"github.com/wanan9999/veepin/wireguard"
 )
 
 // ClientConfigRequest is the operator input to POST /api/listeners/{name}/client-config.

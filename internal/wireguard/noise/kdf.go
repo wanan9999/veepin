@@ -4,7 +4,7 @@ import (
 	"crypto/hmac"
 	"hash"
 
-	"github.com/xen0bit/veepin/internal/cryptoutil"
+	"github.com/wanan9999/veepin/internal/cryptoutil"
 )
 
 // The three primitives WireGuard names in its construction string

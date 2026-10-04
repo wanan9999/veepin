@@ -21,7 +21,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/xen0bit/veepin/internal/vlog"
+	"github.com/wanan9999/veepin/internal/vlog"
 )
 
 //go:embed templates/*

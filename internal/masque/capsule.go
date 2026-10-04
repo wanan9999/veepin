@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/xen0bit/veepin/internal/masque/http3"
+	"github.com/wanan9999/veepin/internal/masque/http3"
 )
 
 // Capsule type codes (RFC 9297 for DATAGRAM, RFC 9484 §4 for the rest).

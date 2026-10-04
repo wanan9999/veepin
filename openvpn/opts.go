@@ -11,7 +11,7 @@ package openvpn
 // not something the panel can offer, since the file would have to already exist
 // on the client.
 
-import "github.com/xen0bit/veepin/client"
+import "github.com/wanan9999/veepin/client"
 
 func init() {
 	client.RegisterClientOpts("openvpn", []client.OptSpec{

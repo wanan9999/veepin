@@ -27,8 +27,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xen0bit/veepin/internal/capture"
-	"github.com/xen0bit/veepin/internal/capture/goldens"
+	"github.com/wanan9999/veepin/internal/capture"
+	"github.com/wanan9999/veepin/internal/capture/goldens"
 )
 
 // captureSpec describes how to record one cell.

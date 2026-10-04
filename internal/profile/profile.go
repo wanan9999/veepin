@@ -23,7 +23,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/xen0bit/veepin/internal/confstore"
+	"github.com/wanan9999/veepin/internal/confstore"
 )
 
 // DefaultDir returns the profiles directory under the user's config home.

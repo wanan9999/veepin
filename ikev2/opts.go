@@ -6,7 +6,7 @@ package ikev2
 // exactly that). Required and Secret mirror the NetworkManager plugin's
 // requireKeys/secretMissing for the same protocol.
 
-import "github.com/xen0bit/veepin/client"
+import "github.com/wanan9999/veepin/client"
 
 func init() {
 	client.RegisterClientOpts("ikev2", []client.OptSpec{

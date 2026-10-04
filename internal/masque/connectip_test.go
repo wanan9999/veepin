@@ -5,7 +5,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/masque/http3"
+	"github.com/wanan9999/veepin/internal/masque/http3"
 )
 
 // Byte-exact, because these layouts are transcribed from RFC 9484 and the whole

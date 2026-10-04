@@ -26,7 +26,7 @@ package goldens
 import (
 	"fmt"
 
-	"github.com/xen0bit/veepin/internal/capture"
+	"github.com/wanan9999/veepin/internal/capture"
 )
 
 // Golden is one recorded cell: where it comes from, how a capture of it is

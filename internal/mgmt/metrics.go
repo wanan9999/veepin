@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/xen0bit/veepin/client"
-	"github.com/xen0bit/veepin/internal/supervisor"
+	"github.com/wanan9999/veepin/client"
+	"github.com/wanan9999/veepin/internal/supervisor"
 )
 
 // GET /api/metrics — the supervisor's traffic figures in Prometheus text

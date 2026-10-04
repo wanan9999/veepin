@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xen0bit/veepin/internal/supervisor"
+	"github.com/wanan9999/veepin/internal/supervisor"
 )
 
 // TestDeleteRefusesTheConfigRootsOwnDirectories: the DELETE handler cleans up a

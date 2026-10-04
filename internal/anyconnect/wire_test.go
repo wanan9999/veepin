@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xen0bit/veepin/dataplane"
+	"github.com/wanan9999/veepin/dataplane"
 )
 
 func TestMarshalParseRoundTrip(t *testing.T) {
