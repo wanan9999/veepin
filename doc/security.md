@@ -59,9 +59,9 @@ shared across every tunnel rather than being per-client:
 So the ceiling is roughly one core per direction for the *whole* server, not just
 per tunnel — adding clients does not add parallelism. Measured, that one core is
 17.7 Gbit/s inbound and 14.7 Gbit/s outbound at 1400-byte packets with the
-syscalls removed. The crypto is not the limit: the `ESPCrypter` holds no shared
-state and is safe to call concurrently, so it is *parallel-ready* even though the
-deployed path drives it from a single goroutine.
+syscalls removed. Prepared CBC `ESPCrypter` instances reuse mutable HMAC state and must not be
+called concurrently. `esp.SA` serializes its cipher calls independently in each
+direction; separate SAs can run in parallel.
 
 It is worth being precise about how much that readiness is worth, because it was
 overstated here as "scales linearly with cores." It does not.
@@ -795,3 +795,19 @@ on `DELETE`. The exposure is bounded to its own rules (it does not own, for
 example, your existing FORWARD policy), but it does mean the supervisor
 process needs `CAP_NET_ADMIN` in addition to the `CAP_NET_ADMIN` every veepin
 process already needs to open a TUN.
+
+## L2TP managed SA lifetime boundary
+
+The L2TP engine enforces negotiated time/ESP-volume limits and prevents sequence
+wrap. Failed renewal retains only unexpired data SAs; it never extends a key's
+hard lifetime. IKE control renewal does not itself reauthenticate PPP or rebuild
+an embedding application's per-user packet device. Fresh control SAs must use
+the existing NAT-T endpoint and authenticated IKE identity to join that session.
+A shared PSK does not provide per-user IKE identity isolation; per-user access
+still depends on PPP/MS-CHAPv2 and the embedding application's session policy.
+
+PFS in Quick Mode, IKE byte lifetimes, raw ESP, 3DES and DH group 2 are not added
+by these lifecycle changes. Self-tests do not prove stock Windows or a particular
+iKuai firmware's negotiated defaults. Verify algorithms, repeated renewal,
+loss/reorder, NAT rebinding and recovery with each production client before
+claiming its interoperability.

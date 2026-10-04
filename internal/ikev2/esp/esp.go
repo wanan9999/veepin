@@ -8,7 +8,9 @@ import (
 	"crypto/subtle"
 	"encoding/binary"
 	"errors"
+	"math"
 	"sync"
+	"time"
 
 	"github.com/wanan9999/veepin/internal/cryptoutil"
 	"github.com/wanan9999/veepin/internal/ikev2/transform"
@@ -20,11 +22,14 @@ import (
 // dropped packets does not create per-packet garbage. The pump logs the SPI/seq
 // separately, so the error values need not carry them.
 var (
-	errShortPacket  = errors.New("esp: packet too short")
-	errUnknownSPI   = errors.New("esp: unknown SPI")
-	errReplayed     = errors.New("esp: replayed sequence")
-	errShortTrailer = errors.New("esp: plaintext too short for trailer")
-	errBadPadLength = errors.New("esp: bad pad length")
+	// ErrSequenceExhausted requires a fresh SA; RFC 4303 forbids wraparound.
+	ErrSAExpired         = errors.New("esp: security association expired")
+	ErrSequenceExhausted = errors.New("esp: sequence exhausted; rekey required")
+	errShortPacket       = errors.New("esp: packet too short")
+	errUnknownSPI        = errors.New("esp: unknown SPI")
+	errReplayed          = errors.New("esp: replayed sequence")
+	errShortTrailer      = errors.New("esp: plaintext too short for trailer")
+	errBadPadLength      = errors.New("esp: bad pad length")
 )
 
 // Transform is the negotiated ESP algorithm configuration for one direction of
@@ -46,21 +51,27 @@ type Transform struct {
 
 // SA is a userspace ESP security association for a single direction pair.
 type SA struct {
-	SPIOut uint32
-	SPIIn  uint32
+	// ExpiresAt is immutable after installation. Zero preserves legacy callers.
+	ExpiresAt time.Time
+	// ByteLimit limits protected plaintext octets independently in each direction.
+	ByteLimit uint64
+	SPIOut    uint32
+	SPIIn     uint32
 
 	Out Transform
 	In  Transform
 
-	mu     sync.Mutex
-	seqOut uint32
-	window replayWindow
+	mu                sync.Mutex
+	seqOut            uint32
+	bytesOut, bytesIn uint64
+	window            replayWindow
 
 	// Prepared per-direction crypters (built lazily from Out/In on first use).
-	outCrypter cryptoutil.ESPCrypter
-	inCrypter  cryptoutil.ESPCrypter
-	prepErr    error
-	prepOnce   sync.Once
+	outCrypter  cryptoutil.ESPCrypter
+	inCrypter   cryptoutil.ESPCrypter
+	prepErr     error
+	prepOnce    sync.Once
+	outMu, inMu sync.Mutex // prepared CBC crypters reuse mutable HMAC state
 }
 
 // espHeaderLen is SPI(4) + Sequence(4).
@@ -119,11 +130,24 @@ func (s *SA) EncapsulatePadded(inner []byte, nextHeader uint8, minInner int) ([]
 }
 
 func (s *SA) encapsulate(inner []byte, nextHeader uint8, minInner int) ([]byte, error) {
+	if !s.ExpiresAt.IsZero() && !time.Now().Before(s.ExpiresAt) {
+		return nil, ErrSAExpired
+	}
 	if err := s.prepare(); err != nil {
 		return nil, err
 	}
 
 	s.mu.Lock()
+	if s.seqOut == math.MaxUint32 {
+		s.mu.Unlock()
+		return nil, ErrSequenceExhausted
+	}
+	volume := uint64(max(len(inner), minInner))
+	if s.ByteLimit != 0 && (volume > s.ByteLimit || s.bytesOut > s.ByteLimit-volume) {
+		s.mu.Unlock()
+		return nil, ErrSAExpired
+	}
+	s.bytesOut += volume
 	s.seqOut++
 	seq := s.seqOut
 	s.mu.Unlock()
@@ -162,7 +186,9 @@ func (s *SA) encapsulate(inner []byte, nextHeader uint8, minInner int) ([]byte, 
 	pt[ptLen-1] = nextHeader
 
 	// AAD covers SPI|Seq (the ESP header). Seal appends iv||ct||icv to out.
+	s.outMu.Lock()
 	result, err := s.outCrypter.Seal(out, out[:espHeaderLen], pt)
+	s.outMu.Unlock()
 	*ptp = pt[:0]
 	ptPool.Put(ptp)
 	return result, err
@@ -174,6 +200,9 @@ var ptPool = sync.Pool{New: func() any { b := make([]byte, 0, 2048); return &b }
 // Decapsulate verifies and decrypts an ESP packet, returning the inner IP
 // payload and the inner next-header value.
 func (s *SA) Decapsulate(pkt []byte) (inner []byte, nextHeader uint8, err error) {
+	if !s.ExpiresAt.IsZero() && !time.Now().Before(s.ExpiresAt) {
+		return nil, 0, ErrSAExpired
+	}
 	if err := s.prepare(); err != nil {
 		return nil, 0, err
 	}
@@ -190,7 +219,9 @@ func (s *SA) Decapsulate(pkt []byte) (inner []byte, nextHeader uint8, err error)
 	body := pkt[espHeaderLen:]
 
 	// Decrypt appending into a fresh buffer sized to the ciphertext.
+	s.inMu.Lock()
 	plaintext, err := s.inCrypter.Open(make([]byte, 0, len(body)), hdr, body)
+	s.inMu.Unlock()
 	if err != nil {
 		return nil, 0, err
 	}
@@ -220,6 +251,16 @@ func (s *SA) Decapsulate(pkt []byte) (inner []byte, nextHeader uint8, err error)
 	// nextHeader means, not here; the ike package's espTunnel does it.
 
 	s.mu.Lock()
+	if s.window.check(seq) {
+		s.mu.Unlock()
+		return nil, 0, errReplayed
+	}
+	volume := uint64(len(inner))
+	if s.ByteLimit != 0 && (volume > s.ByteLimit || s.bytesIn > s.ByteLimit-volume) {
+		s.mu.Unlock()
+		return nil, 0, ErrSAExpired
+	}
+	s.bytesIn += volume
 	s.window.advance(seq)
 	s.mu.Unlock()
 	return inner, nextHeader, nil
@@ -267,3 +308,10 @@ func (w *replayWindow) advance(seq uint32) {
 
 // const-time compare re-exported for tests / future MAC checks.
 var _ = subtle.ConstantTimeCompare
+
+// NeedsRekey gives the owner time to negotiate before the hard sequence limit.
+func (s *SA) NeedsRekey() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.seqOut >= math.MaxUint32-(1<<20) || (s.ByteLimit != 0 && (s.bytesOut >= s.ByteLimit*4/5 || s.bytesIn >= s.ByteLimit*4/5))
+}

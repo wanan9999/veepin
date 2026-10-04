@@ -70,3 +70,17 @@ Control vs data is demuxed by the header **T-bit**.
   quiet here: the ESP transport SA and the L2TP control connection inside it.
 - Data messages carry PPP frames handed to [`internal/ppp`](../ppp); the inner IP
   ultimately rides TUN ⇄ PPP ⇄ L2TP ⇄ ESP.
+
+## Server cleanup and liveness
+
+Half-open admission slots are released exactly once on IPsec establishment or
+failure. Setup must reach PPP network-up within 60 seconds. Established sessions
+send an encrypted L2TP HELLO every 30 seconds, requiring its acknowledgement
+within 10 seconds (the reliable channel may fail earlier). Silent peers release
+their IP, packet device, indexes and protocol timers. Socket or TUN read failure
+is returned from Serve rather than leaving a partially listening server healthy.
+
+The receive path keeps unexpired overlapping ESP SAs during rekey and checks
+their deadlines on every packet. Expired index entries are pruned by the monitor.
+Shared CBC/HMAC state is serialized separately in each ESP direction, including
+when a timer sends a control packet concurrently with application traffic.

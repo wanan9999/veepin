@@ -2,10 +2,12 @@ package l2tp
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/wanan9999/veepin/dataplane"
 	"github.com/wanan9999/veepin/internal/ikev1"
@@ -67,6 +69,7 @@ type Client struct {
 
 	mu     sync.Mutex
 	sa     *esp.SA
+	sas    map[uint32]timedSA
 	tunnel *Tunnel
 	ppp    *ppp.Session
 	closed bool
@@ -104,15 +107,16 @@ func NewClient(conn *net.UDPConn, tun tunIO, cfg ClientConfig) *Client {
 		localPort = uint16(la.Port)
 	}
 	c.ike = ikev1.NewSession(ikev1.Config{
-		Role:      ikev1.Initiator,
-		PSK:       cfg.PSK,
-		LocalIP:   c.localIP,
-		PeerIP:    cfg.ServerIP,
-		LocalPort: localPort,
-		PeerPort:  uint16(ikePort),
-		Send:      c.sendIKE,
-		Handler:   c,
-		Logger:    logger,
+		Role:           ikev1.Initiator,
+		ManageLifetime: true,
+		PSK:            cfg.PSK,
+		LocalIP:        c.localIP,
+		PeerIP:         cfg.ServerIP,
+		LocalPort:      localPort,
+		PeerPort:       uint16(ikePort),
+		Send:           c.sendIKE,
+		Handler:        c,
+		Logger:         logger,
 	})
 	return c
 }
@@ -191,6 +195,7 @@ func (c *Client) fail(err error) {
 	c.mu.Unlock()
 
 	close(c.done)
+	go c.ike.Close()
 	c.conn.Close()
 	if t != nil {
 		t.Close()
@@ -241,6 +246,19 @@ func (c *Client) recvLoop() {
 func (c *Client) handleESP(pkt []byte) {
 	c.mu.Lock()
 	sa, tun := c.sa, c.tunnel
+	if c.sas != nil {
+		if len(pkt) < 4 {
+			c.mu.Unlock()
+			return
+		}
+		entry, ok := c.sas[binary.BigEndian.Uint32(pkt)]
+		if !ok || !time.Now().Before(entry.expires) {
+			c.mu.Unlock()
+			return
+		}
+		sa = entry.sa
+	}
+	active := sa == c.sa
 	c.mu.Unlock()
 	if sa == nil || tun == nil {
 		return
@@ -248,6 +266,9 @@ func (c *Client) handleESP(pkt []byte) {
 	inner, nh, err := sa.Decapsulate(pkt)
 	if err != nil || nh != ipProtoUDP {
 		return
+	}
+	if active && sa.NeedsRekey() {
+		c.ike.RequestRekey()
 	}
 	if l2, ok := unwrapUDP(inner); ok {
 		tun.HandleInbound(l2)
@@ -258,7 +279,25 @@ func (c *Client) handleESP(pkt []byte) {
 
 func (c *Client) Established(r ikev1.Result) {
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
 	c.sa = newESPSA(r)
+	if c.sas == nil {
+		c.sas = make(map[uint32]timedSA)
+	}
+	now := time.Now()
+	for spi, entry := range c.sas {
+		if !now.Before(entry.expires) {
+			delete(c.sas, spi)
+		}
+	}
+	c.sas[r.InSPI] = timedSA{sa: c.sa, expires: now.Add(r.Lifetime)}
+	if c.tunnel != nil {
+		c.mu.Unlock()
+		return
+	}
 	c.tunnel = NewTunnel(RoleLAC, c.espSend, c)
 	tun := c.tunnel
 	c.mu.Unlock()
@@ -275,6 +314,9 @@ func (c *Client) espSend(l2tp []byte) error {
 	c.mu.Unlock()
 	if sa == nil {
 		return errors.New("l2tp: ESP SA not ready")
+	}
+	if sa.NeedsRekey() {
+		c.ike.RequestRekey()
 	}
 	pkt, err := sa.Encapsulate(wrapUDP(l2tp), ipProtoUDP)
 	if err != nil {
@@ -355,5 +397,19 @@ func (c *Client) tunToTunnel() {
 			c.fail(fmt.Errorf("l2tp: send: %w", err))
 			return
 		}
+	}
+}
+
+func (c *Client) DeleteESP(spi uint32) {
+	c.mu.Lock()
+	current := c.sa != nil && c.sa.SPIOut == spi
+	for in, entry := range c.sas {
+		if entry.sa.SPIOut == spi {
+			delete(c.sas, in)
+		}
+	}
+	c.mu.Unlock()
+	if current {
+		c.fail(errors.New("l2tp: peer deleted active ESP SA"))
 	}
 }

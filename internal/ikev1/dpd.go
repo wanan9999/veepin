@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // dpdSPILen is the Notification SPI for a DPD message: CKY-I | CKY-R.
@@ -91,8 +92,13 @@ func (s *Session) sendInformational(payloads []payload) error {
 // this one.
 func (s *Session) Ping() (<-chan struct{}, error) {
 	s.mu.Lock()
+	if s.activeIKE != nil {
+		active := s.activeIKE
+		s.mu.Unlock()
+		return active.Ping()
+	}
 	defer s.mu.Unlock()
-	if s.state != stDone {
+	if s.closed || s.state != stDone || (s.cfg.ManageLifetime && !time.Now().Before(s.ikeDeadline)) {
 		return nil, errors.New("ikev1: the session is not established")
 	}
 	s.dpdSeq++
@@ -128,6 +134,13 @@ func (s *Session) handleDPD(h header, first uint8, rest []byte) error {
 		return errors.New("informational HASH verification failed")
 	}
 	s.authenticatedInbound()
+	for _, p := range payloads {
+		if p.typ == payloadDelete {
+			if err := s.processDelete(p.body); err != nil {
+				return err
+			}
+		}
+	}
 	np, ok := findPayload(payloads, payloadNotify)
 	if !ok {
 		return nil // a delete or some other notification-free message; nothing to do

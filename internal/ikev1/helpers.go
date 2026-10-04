@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"time"
 )
 
 func randRead(b []byte) (int, error) { return rand.Read(b) }
@@ -80,8 +81,19 @@ func (s *Session) finish() {
 	outKM := s.keys.keymat(protoESP, be32(s.outSPI), s.qmNi, s.qmNr, total)
 	inKM := s.keys.keymat(protoESP, be32(s.inSPI), s.qmNi, s.qmNr, total)
 
+	peerID := s.idI
+	if s.cfg.Role == Initiator {
+		peerID = s.idR
+	}
+	if s.quickParent != nil {
+		peerID = s.quickParent.peerID
+	}
 	r := Result{
-		EncrID: encrID, EncrKeyLn: keyLn, IntegID: integID,
+		PeerID:    append([]byte(nil), peerID...),
+		Lifetime:  time.Duration(s.esp.lifeSeconds) * time.Second,
+		ByteLimit: uint64(s.esp.lifeKilobytes) * 1024,
+		Rekey:     s.quickParent != nil,
+		EncrID:    encrID, EncrKeyLn: keyLn, IntegID: integID,
 		OutSPI: s.outSPI, InSPI: s.inSPI, NATT: s.floated,
 		OutEncKey: outKM[:encKeyLen], OutIntegKey: outKM[encKeyLen:],
 		InEncKey: inKM[:encKeyLen], InIntegKey: inKM[encKeyLen:],
@@ -93,6 +105,11 @@ func (s *Session) finish() {
 	if s.timer != nil {
 		s.timer.Stop()
 		s.timer = nil
+	}
+	if s.cfg.ManageLifetime && s.quickParent == nil {
+		s.established = true
+		s.peerID = append([]byte(nil), r.PeerID...)
+		s.installLifetimeLocked(r.Lifetime)
 	}
 	s.cfg.Handler.Established(r)
 }
@@ -142,7 +159,11 @@ func ikePropFromAttrs(attrs []attr) (ikeProposal, bool) {
 		return ikeProposal{}, false
 	}
 	kb, _ := basicAttrOf(attrs, attrKeyLength)
-	return ikeProposal{encr: enc, keyBits: kb, hash: hsh, group: grp, auth: auth, lifeSeconds: 3600}, true
+	life, ok := proposalLifetime(attrs, attrLifeType, attrLifeDuration)
+	if !ok {
+		return ikeProposal{}, false
+	}
+	return ikeProposal{encr: enc, keyBits: kb, hash: hsh, group: grp, auth: auth, lifeSeconds: life}, true
 }
 
 // supportedIKE reports whether a phase-1 proposal is one this session will use.
@@ -165,12 +186,13 @@ func (s *Session) supportedIKE(p ikeProposal) bool {
 // Restrict the addition to L2TP servers: an initiator must not accept AES-128
 // from a responder when its own offer contained only AES-256.
 func (s *Session) supportedAESKeyBits(bits uint16) bool {
-	return bits == 256 || (bits == 128 && s.cfg.Role == Responder && s.cfg.Phase2 == Phase2L2TP)
+	return bits == 256 || (bits == 128 && (s.cfg.Role == Responder || s.quickParent != nil || s.renewalRoot != nil) && s.cfg.Phase2 == Phase2L2TP)
 }
 
 func (s *Session) selectIKEProposal(transforms []parsedTransform) (ikeProposal, uint8, bool) {
 	for _, t := range transforms {
 		if p, ok := ikePropFromAttrs(t.attrs); ok && s.supportedIKE(p) {
+			p.lifeSeconds = min(p.lifeSeconds, lifetimeSeconds(s.cfg.IKELifetime))
 			return p, t.num, true
 		}
 	}
@@ -184,7 +206,15 @@ func espPropFromAttrs(transformID uint8, attrs []attr) (espProposal, bool) {
 	}
 	encap, _ := basicAttrOf(attrs, ipsecAttrEncapMode)
 	kb, _ := basicAttrOf(attrs, ipsecAttrKeyLength)
-	return espProposal{transformID: transformID, keyBits: kb, authAlg: auth, encap: encap, lifeSeconds: 3600}, true
+	life, kbLife, ok := proposalLifetimes(attrs, ipsecAttrLifeType, ipsecAttrLifeDuration)
+	if !ok {
+		return espProposal{}, false
+	}
+	// PFS needs a KE payload and a separate DH secret; do not accept it silently.
+	if _, present := findAttr(attrs, 3); present {
+		return espProposal{}, false
+	}
+	return espProposal{transformID: transformID, keyBits: kb, authAlg: auth, encap: encap, lifeSeconds: life, lifeKilobytes: kbLife}, true
 }
 
 // supportedESP reports whether a phase-2 proposal matches the profile. The
@@ -205,6 +235,7 @@ func (s *Session) supportedESP(p espProposal) bool {
 func (s *Session) selectESPProposal(transforms []parsedTransform) (espProposal, uint8, bool) {
 	for _, t := range transforms {
 		if p, ok := espPropFromAttrs(t.id, t.attrs); ok && s.supportedESP(p) {
+			p.lifeSeconds = min(p.lifeSeconds, lifetimeSeconds(s.cfg.ESPLifetime))
 			return p, t.num, true
 		}
 	}

@@ -2,6 +2,7 @@ package l2tp
 
 import (
 	"encoding/binary"
+	"time"
 
 	"github.com/wanan9999/veepin/internal/ikev1"
 	"github.com/wanan9999/veepin/internal/ikev2/esp"
@@ -36,9 +37,15 @@ const (
 // Result already expresses the transform in the IKEv2 IDs the esp package
 // consumes and orients the keys/SPIs for the local end.
 func newESPSA(r ikev1.Result) *esp.SA {
+	deadline := time.Time{}
+	if r.Lifetime > 0 {
+		deadline = time.Now().Add(r.Lifetime)
+	}
 	return &esp.SA{
-		SPIOut: r.OutSPI,
-		SPIIn:  r.InSPI,
+		ExpiresAt: deadline,
+		ByteLimit: r.ByteLimit,
+		SPIOut:    r.OutSPI,
+		SPIIn:     r.InSPI,
 		Out: esp.Transform{
 			EncrID:    r.EncrID,
 			EncrKeyLn: r.EncrKeyLn,

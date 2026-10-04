@@ -86,7 +86,18 @@ func NewServer(cfg ServerConfig, tr Transport, h ServerHandler) *ServerSession {
 func (s *ServerSession) Start() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sendLCPConfigReq()
+	if s.phase != phaseClosed {
+		s.sendLCPConfigReq()
+	}
+}
+
+// Close stops owner-managed teardown without re-entering its callback.
+func (s *ServerSession) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.phase = phaseClosed
+	s.lcpRestart.stop()
+	s.ipcpRestart.stop()
 }
 
 // Receive dispatches one inbound PPP frame by protocol.

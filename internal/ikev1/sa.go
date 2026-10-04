@@ -167,21 +167,26 @@ func parseSA(body []byte) (proto uint8, spi []byte, transforms []parsedTransform
 
 // espProposal is a phase-2 (IPsec ESP) cipher suite for Quick Mode.
 type espProposal struct {
-	transformID uint8  // espTransformAES
-	keyBits     uint16 // AES key length in bits
-	authAlg     uint16 // authHMACSHA2256 / authHMACSHA
-	encap       uint16 // encapUDPTransport
-	lifeSeconds uint32
+	transformID   uint8  // espTransformAES
+	keyBits       uint16 // AES key length in bits
+	authAlg       uint16 // authHMACSHA2256 / authHMACSHA
+	encap         uint16 // encapUDPTransport
+	lifeSeconds   uint32
+	lifeKilobytes uint32
 }
 
 func (p espProposal) attrs() []byte {
-	return encodeAttrs([]attr{
+	attrs := []attr{
 		basicAttr(ipsecAttrEncapMode, p.encap),
 		basicAttr(ipsecAttrAuthAlg, p.authAlg),
 		basicAttr(ipsecAttrKeyLength, p.keyBits),
 		basicAttr(ipsecAttrLifeType, lifeTypeSeconds),
 		varAttr(ipsecAttrLifeDuration, be32(p.lifeSeconds)),
-	})
+	}
+	if p.lifeKilobytes != 0 {
+		attrs = append(attrs, basicAttr(ipsecAttrLifeType, 2), varAttr(ipsecAttrLifeDuration, be32(p.lifeKilobytes)))
+	}
+	return encodeAttrs(attrs)
 }
 
 // buildPhase2SA renders an ESP SA payload body carrying spi and the given ESP

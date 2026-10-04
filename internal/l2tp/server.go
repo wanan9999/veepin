@@ -1,11 +1,14 @@
 package l2tp
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/wanan9999/veepin/dataplane"
 	"github.com/wanan9999/veepin/internal/ikev1"
@@ -73,6 +76,7 @@ type Server struct {
 	bySPI    map[uint32]*serverPeer  // our inbound ESP SPI -> peer
 	byIP     map[uint32]*serverPeer  // inner IP -> peer, for TUN egress
 
+	serveErr  chan error
 	done      chan struct{}
 	closeOnce sync.Once
 }
@@ -101,6 +105,7 @@ func NewServer(rawIKE, rawNATT *net.UDPConn, tun tunIO, cfg ServerConfig) *Serve
 		bySPI:    map[uint32]*serverPeer{},
 		byIP:     map[uint32]*serverPeer{},
 		done:     make(chan struct{}),
+		serveErr: make(chan error, 3),
 	}
 }
 
@@ -118,8 +123,14 @@ func (s *Server) Serve() error {
 		go s.tunLoop()
 	}
 	go s.recvIKE()
-	s.recvNATT()
-	return nil
+	go s.recvNATT()
+	select {
+	case <-s.done:
+		return nil
+	case err := <-s.serveErr:
+		_ = s.Close()
+		return err
+	}
 }
 
 // Close stops the server.
@@ -149,6 +160,7 @@ func (s *Server) recvIKE() {
 	for {
 		n, addr, err := s.ikeConn.ReadFromUDP(buf)
 		if err != nil {
+			s.readFailed("recvIKE", err)
 			return
 		}
 		s.dispatchIKE(append([]byte(nil), buf[:n]...), addr, false)
@@ -183,6 +195,7 @@ func (s *Server) recvNATT() {
 			}
 		}
 		if err != nil {
+			s.readFailed("recvNATT", err)
 			return
 		}
 	}
@@ -194,6 +207,14 @@ func (s *Server) dispatchIKE(msg []byte, addr *net.UDPAddr, natt bool) {
 	cookie, ok := ikev1.InitiatorCookie(msg)
 	if !ok {
 		return
+	}
+	if !ikev1.IsInitialMainMode(msg) {
+		s.mu.Lock()
+		known := s.byCookie[cookie] != nil
+		s.mu.Unlock()
+		if !known {
+			return
+		}
 	}
 	p := s.peerFor(cookie, addr, natt)
 	if p == nil {
@@ -232,9 +253,30 @@ func (s *Server) peerFor(cookie [8]byte, addr *net.UDPAddr, natt bool) *serverPe
 		return nil
 	}
 
+	// A fresh IKE SA from the same authenticated transport may renew the
+	// control channel without tearing down PPP. The IKE layer verifies identity.
+	for _, existing := range s.byCookie {
+		existing.mu.Lock()
+		same := natt && existing.ready && !existing.closed && existing.nattAddr.Port == addr.Port && existing.nattAddr.IP.Equal(addr.IP)
+		existing.mu.Unlock()
+		if same {
+			s.gate.Done()
+			count := 0
+			for _, owner := range s.byCookie {
+				if owner == existing {
+					count++
+				}
+			}
+			if count >= 10 {
+				return nil
+			}
+			return existing
+		}
+	}
 	p := &serverPeer{
 		srv:    s,
 		cookie: cookie,
+		done:   make(chan struct{}),
 		addr:   addr,
 		// Pin unauthenticated replies to this initial endpoint. No guessed
 		// destination port is used while waiting for an authenticated float.
@@ -242,17 +284,19 @@ func (s *Server) peerFor(cookie [8]byte, addr *net.UDPAddr, natt bool) *serverPe
 		ikeNATT:  natt,
 	}
 	p.ike = ikev1.NewSession(ikev1.Config{
-		Role:      ikev1.Responder,
-		PSK:       s.cfg.PSK,
-		LocalIP:   s.publicIP(),
-		PeerIP:    addr.IP,
-		LocalPort: defaultIKEPort,
-		PeerPort:  uint16(addr.Port),
-		Send:      p.sendIKE,
-		Handler:   p,
-		Logger:    s.logger,
+		Role:           ikev1.Responder,
+		ManageLifetime: true,
+		PSK:            s.cfg.PSK,
+		LocalIP:        s.publicIP(),
+		PeerIP:         addr.IP,
+		LocalPort:      defaultIKEPort,
+		PeerPort:       uint16(addr.Port),
+		Send:           p.sendIKE,
+		Handler:        p,
+		Logger:         s.logger,
 	})
 	s.byCookie[cookie] = p
+	go p.monitor()
 	s.logger.Printf("l2tp: new peer %s (cookie %x)", addr, cookie)
 	return p
 }
@@ -283,7 +327,9 @@ func (s *Server) peerBySPI(pkt []byte) *serverPeer {
 
 func (s *Server) mapSPI(spi uint32, p *serverPeer) {
 	s.mu.Lock()
-	s.bySPI[spi] = p
+	if s.byCookie[p.cookie] == p {
+		s.bySPI[spi] = p
+	}
 	s.mu.Unlock()
 }
 
@@ -300,7 +346,9 @@ func (s *Server) peerByIP(ip net.IP) *serverPeer {
 func (s *Server) mapIP(ip net.IP, p *serverPeer) {
 	if v4 := ip.To4(); v4 != nil {
 		s.mu.Lock()
-		s.byIP[binary.BigEndian.Uint32(v4)] = p
+		if s.byCookie[p.cookie] == p {
+			s.byIP[binary.BigEndian.Uint32(v4)] = p
+		}
 		s.mu.Unlock()
 	}
 }
@@ -310,36 +358,49 @@ func (s *Server) mapIP(ip net.IP, p *serverPeer) {
 // map-presence check makes the second call a no-op.
 func (s *Server) removePeer(p *serverPeer, err error) {
 	s.mu.Lock()
-	if _, ok := s.byCookie[p.cookie]; !ok {
+	if s.byCookie[p.cookie] != p {
 		s.mu.Unlock()
 		return
 	}
-	delete(s.byCookie, p.cookie)
-	if p.inSPI != 0 {
-		delete(s.bySPI, p.inSPI)
+	for cookie, owner := range s.byCookie {
+		if owner == p {
+			delete(s.byCookie, cookie)
+		}
 	}
-	if v4 := p.innerIP.To4(); v4 != nil {
-		delete(s.byIP, binary.BigEndian.Uint32(v4))
-	}
-	s.mu.Unlock()
-
-	if p.innerIP != nil {
-		s.pool.Release(p.innerIP)
+	p.releaseAdmission()
+	for spi, owner := range s.bySPI {
+		if owner == p {
+			delete(s.bySPI, spi)
+		}
 	}
 	p.mu.Lock()
-	t := p.tunnel
-	p.closed = true
-	p.ready = false
-	device := p.device
-	p.device = nil
+	address, addr := p.innerIP, p.addr
+	t, ps, device := p.tunnel, p.ppp, p.device
+	p.closed, p.ready, p.device = true, false, nil
+	if p.done != nil {
+		close(p.done)
+	}
+	if v4 := address.To4(); v4 != nil {
+		delete(s.byIP, binary.BigEndian.Uint32(v4))
+	}
 	p.mu.Unlock()
+	s.mu.Unlock()
+	if address != nil {
+		s.pool.Release(address)
+	}
+	if ps != nil {
+		go ps.Close()
+	} // A PPP callback may already hold its lock.
+	if p.ike != nil {
+		go p.ike.Close()
+	} // IKE callbacks may own the session lock.
 	if device != nil {
 		_ = device.Close()
 	}
 	if t != nil {
 		t.Close()
 	}
-	s.logger.Printf("l2tp: peer %s gone: %v", p.addr, err)
+	s.logger.Printf("l2tp: peer %s gone: %v", addr, err)
 }
 
 func (s *Server) auth(username string) (string, bool) {
@@ -353,6 +414,7 @@ func (s *Server) tunLoop() {
 	for {
 		n, err := s.tun.Read(buf)
 		if err != nil {
+			s.readFailed("tunLoop", err)
 			return
 		}
 		dst := ipv4Dst(buf[:n])
@@ -372,7 +434,9 @@ func (s *Server) tunLoop() {
 			// ESP packet this becomes is the same size whatever the inner packet
 			// was. RFC 1661 5.1 sanctions the padding; ppp.IsIP trims it back.
 			pkt := append([]byte(nil), buf[:n]...)
-			_ = t.SendPPP(ppp.EncapsulateIPPadded(pkt, s.shaper.Target(pkt, s.mtu())))
+			if err := t.SendPPP(ppp.EncapsulateIPPadded(pkt, s.shaper.Target(pkt, s.mtu()))); err != nil {
+				s.removePeer(p, err)
+			}
 		}
 	}
 }
@@ -383,19 +447,22 @@ type serverPeer struct {
 	cookie [8]byte
 	ike    *ikev1.Session
 
-	mu       sync.Mutex
-	addr     *net.UDPAddr // where Main Mode came from
-	nattAddr *net.UDPAddr // where floated IKE and ESP go
-	ikeNATT  bool         // peer has actually sent IKE on the NAT-T socket
-	sa       *esp.SA
-	inSPI    uint32
-	tunnel   *Tunnel
-	ppp      *ppp.ServerSession
-	innerIP  net.IP
-	username string
-	ready    bool
-	closed   bool
-	device   io.ReadWriteCloser
+	mu            sync.Mutex
+	addr          *net.UDPAddr // where Main Mode came from
+	nattAddr      *net.UDPAddr // where floated IKE and ESP go
+	ikeNATT       bool         // peer has actually sent IKE on the NAT-T socket
+	sa            *esp.SA
+	sas           map[uint32]timedSA
+	inSPI         uint32
+	tunnel        *Tunnel
+	ppp           *ppp.ServerSession
+	innerIP       net.IP
+	username      string
+	ready         bool
+	closed        bool
+	device        io.ReadWriteCloser
+	done          chan struct{}
+	admissionOnce sync.Once
 }
 
 // noteIKEAddr commits a cryptographically verified IKE packet's endpoint.
@@ -439,6 +506,10 @@ func (p *serverPeer) noteAddr(addr *net.UDPAddr) {
 
 func (p *serverPeer) sendIKE(msg []byte, _ bool) error {
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return net.ErrClosed
+	}
 	ike, nat := p.addr, p.nattAddr
 	natt := p.ikeNATT
 	p.mu.Unlock()
@@ -456,7 +527,24 @@ func (p *serverPeer) sendIKE(msg []byte, _ bool) error {
 
 func (p *serverPeer) handleESP(pkt []byte, addr *net.UDPAddr) {
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
 	sa, tun := p.sa, p.tunnel
+	if p.sas != nil {
+		if len(pkt) < 4 {
+			p.mu.Unlock()
+			return
+		}
+		entry, ok := p.sas[binary.BigEndian.Uint32(pkt)]
+		if !ok || !time.Now().Before(entry.expires) {
+			p.mu.Unlock()
+			return
+		}
+		sa = entry.sa
+	}
+	active := sa == p.sa
 	p.mu.Unlock()
 	if sa == nil || tun == nil {
 		return
@@ -464,6 +552,9 @@ func (p *serverPeer) handleESP(pkt []byte, addr *net.UDPAddr) {
 	inner, nh, err := sa.Decapsulate(pkt)
 	if err != nil || nh != ipProtoUDP {
 		return
+	}
+	if active && sa.NeedsRekey() {
+		p.ike.RequestRekey()
 	}
 	if l2, ok := unwrapUDP(inner); ok {
 		p.noteAddr(addr)
@@ -474,23 +565,42 @@ func (p *serverPeer) handleESP(pkt []byte, addr *net.UDPAddr) {
 // --- ikev1.Handler ---
 
 func (p *serverPeer) Established(r ikev1.Result) {
+	p.releaseAdmission()
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
 	p.sa = newESPSA(r)
 	p.inSPI = r.InSPI
-	p.tunnel = NewTunnel(RoleLNS, p.espSend, p) // LNS starts passively on SCCRQ
+	if p.sas == nil {
+		p.sas = make(map[uint32]timedSA)
+	}
+	now := time.Now()
+	p.sas[r.InSPI] = timedSA{sa: p.sa, expires: now.Add(r.Lifetime)}
+	if p.tunnel == nil {
+		p.tunnel = NewTunnel(RoleLNS, p.espSend, p)
+	}
 	p.mu.Unlock()
 	p.srv.mapSPI(r.InSPI, p)
-	p.srv.logger.Printf("l2tp: IPsec SA established with %s (spi in=%#x out=%#x)", p.addr, r.InSPI, r.OutSPI)
+	p.srv.logger.Printf("l2tp: IPsec SA established with %s (spi in=%#x out=%#x rekey=%v)", p.addr, r.InSPI, r.OutSPI, r.Rekey)
 }
 
 func (p *serverPeer) Failed(err error) { p.srv.removePeer(p, err) }
 
 func (p *serverPeer) espSend(l2tp []byte) error {
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return net.ErrClosed
+	}
 	sa, to := p.sa, p.nattAddr
 	p.mu.Unlock()
 	if sa == nil {
 		return errors.New("l2tp: ESP SA not ready")
+	}
+	if sa.NeedsRekey() {
+		p.ike.RequestRekey()
 	}
 	pkt, err := sa.Encapsulate(wrapUDP(l2tp), ipProtoUDP)
 	if err != nil {
@@ -509,6 +619,11 @@ func (p *serverPeer) SessionUp() {
 		return
 	}
 	p.mu.Lock()
+	if p.closed || p.ppp != nil {
+		p.mu.Unlock()
+		p.srv.pool.Release(ip)
+		return
+	}
 	p.innerIP = ip
 	p.ppp = ppp.NewServer(ppp.ServerConfig{
 		ClientIP: ip,
@@ -632,7 +747,12 @@ func (p *serverPeer) deviceLoop(device io.ReadWriteCloser) {
 func (s *Server) KickUserSessions(user string) int {
 	s.mu.Lock()
 	var peers []*serverPeer
+	seen := make(map[*serverPeer]bool)
 	for _, p := range s.byCookie {
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
 		p.mu.Lock()
 		match := p.username == user
 		p.mu.Unlock()
@@ -645,4 +765,122 @@ func (s *Server) KickUserSessions(user string) int {
 		s.removePeer(p, errors.New("l2tp: user disconnected"))
 	}
 	return len(peers)
+}
+
+// readFailed distinguishes administrative closure from a dead listener. The
+// owner must see the latter even when the other UDP socket still works.
+func (s *Server) readFailed(op string, err error) {
+	select {
+	case <-s.done:
+		return
+	default:
+	}
+	select {
+	case s.serveErr <- fmt.Errorf("l2tp: %s: %w", op, err):
+	default:
+	}
+}
+func (p *serverPeer) releaseAdmission() {
+	p.admissionOnce.Do(func() {
+		if p.srv.gate != nil {
+			p.srv.gate.Done()
+		}
+	})
+}
+
+// A HELLO tests both ESP and L2TP without requiring a vendor DPD extension.
+// The absolute setup deadline also covers a silent PPP authentication peer.
+func (p *serverPeer) monitor() { p.monitorWithTimeouts(time.Minute, 30*time.Second, 10*time.Second) }
+
+func (p *serverPeer) monitorWithTimeouts(setupTimeout, interval, probeTimeout time.Duration) {
+	setup := time.NewTimer(setupTimeout)
+	defer setup.Stop()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.done:
+			return
+		case <-setup.C:
+			p.mu.Lock()
+			ready := p.ready
+			p.mu.Unlock()
+			if !ready {
+				p.srv.removePeer(p, errors.New("l2tp: setup timed out"))
+				return
+			}
+		case <-ticker.C:
+			p.pruneSAs()
+			p.mu.Lock()
+			tunnel, ready := p.tunnel, p.ready
+			p.mu.Unlock()
+			if !ready || tunnel == nil {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+			err := tunnel.SendHello(ctx)
+			cancel()
+			if err != nil {
+				p.srv.removePeer(p, fmt.Errorf("l2tp: liveness: %w", err))
+				return
+			}
+		}
+	}
+}
+
+type timedSA struct {
+	sa      *esp.SA
+	expires time.Time
+}
+
+// A Delete names the peer's inbound SPI, which is our outbound SPI.
+func (p *serverPeer) DeleteESP(spi uint32) {
+	p.srv.mu.Lock()
+	p.mu.Lock()
+	current := p.sa != nil && p.sa.SPIOut == spi
+	for in, entry := range p.sas {
+		if entry.sa.SPIOut == spi {
+			delete(p.sas, in)
+			if p.srv.bySPI[in] == p {
+				delete(p.srv.bySPI, in)
+			}
+		}
+	}
+	p.mu.Unlock()
+	p.srv.mu.Unlock()
+	if current {
+		p.srv.removePeer(p, errors.New("l2tp: peer deleted active ESP SA"))
+	}
+}
+
+// Deadlines reject packets immediately; this also releases expired index entries.
+func (p *serverPeer) pruneSAs() {
+	p.srv.mu.Lock()
+	defer p.srv.mu.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for spi, entry := range p.sas {
+		if !time.Now().Before(entry.expires) {
+			delete(p.sas, spi)
+			if p.srv.bySPI[spi] == p {
+				delete(p.srv.bySPI, spi)
+			}
+		}
+	}
+}
+
+func (p *serverPeer) RegisterIKE(cookie [8]byte) {
+	p.srv.mu.Lock()
+	defer p.srv.mu.Unlock()
+	if p.srv.byCookie[p.cookie] == p {
+		p.srv.byCookie[cookie] = p
+	}
+}
+func (p *serverPeer) UnregisterIKE(cookie [8]byte) {
+	p.srv.mu.Lock()
+	defer p.srv.mu.Unlock()
+	// The primary cookie is the owner's registry key until the PPP session ends.
+	if cookie != p.cookie && p.srv.byCookie[cookie] == p {
+		delete(p.srv.byCookie, cookie)
+	}
 }

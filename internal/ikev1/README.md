@@ -72,4 +72,34 @@ sequenceDiagram
   as TunnelForge v0.7.4. The same negotiated length drives key derivation and
   encryption. Cisco profiles and initiator offers are unchanged; 3DES and
   MODP-1024 remain unsupported. AES-128/SHA-1 compatibility does not provide
-  rekey support or establish that every native client is interoperable.
+  proof that every native client is interoperable.
+
+## Managed L2TP lifecycle
+
+`Config.ManageLifetime` is enabled by the L2TP engine only. Each Quick Mode
+owns its message ID, CBC IV and retry state. Repeated Quick Mode can start from
+either side; completed exchanges cache replies for 30 seconds and message IDs
+are not reused within the control SA. State is bounded to 32 cached exchanges,
+1024 used message IDs and 8 overlapping control SAs.
+
+The local time ceiling defaults to 3600 seconds for both phases. A shorter peer
+lifetime wins. ESP renews at 80% (initiator) or 90% (responder); IKE starts fresh
+Main Mode at 75%. IKE renewal uses UDP/4500 and new cookies/DH/nonces, checks the
+same authenticated identity, and keeps the existing PPP session. Multiple control SAs can coexist after crossed renewal; the two peers need
+not prefer the same one. Older control SAs still accept authenticated Quick Mode
+and Informational traffic until their deadline. The selected ESP SA has an
+owner-wide hard deadline, independent of which control SA negotiated it.
+
+ESP accepts simultaneous seconds and kilobytes limits (RFC 2407 sections
+4.5.2–4.5.4), counting protected plaintext per direction and requesting rekey at
+80% of the volume limit. Expired ESP packets and sequence wrap are rejected.
+An expired/deleted IKE SA cannot create more ESP SAs, but does not by itself
+expire an independently valid ESP SA. An authenticated Delete for an old ESP
+pair removes only that pair; deletion of the current pair ends the session.
+IKE byte lifetimes and Quick Mode PFS remain unsupported and are rejected.
+
+`lifecycle_test.go` covers timed renewal across several lifetimes, crossed IKE
+renewal, both Quick Mode roles, lost QM3, authenticated Delete and expiry.
+`../l2tp/engine_test.go` additionally checks real loopback UDP, preserved PPP and
+bidirectional packets after renewal. These are self-interoperability tests;
+Windows, iKuai and independent strongSwan long-run verification are separate gates.

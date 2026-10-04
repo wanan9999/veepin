@@ -995,8 +995,11 @@ each a localized extension point, not a structural rework:
   username/password only (no client certificates or SSO flows).
 - **L2TP/IPsec requires UDP-encapsulated ESP.** No raw IP-protocol-50 path, so it
   always forces the NAT-T float to UDP/4500. IKEv1 is Main Mode + PSK only (no
-  Aggressive Mode, certificates, or Quick-Mode PFS), one child SA with no phase-2
-  rekey, MS-CHAPv2 only.
+  Aggressive Mode, certificates, or Quick-Mode PFS), MS-CHAPv2 only. The L2TP
+  engine manages repeated Quick Mode and fresh Main Mode renewal while keeping
+  PPP alive. Time and ESP-volume limits are enforced; failed renewal never
+  permits expired keys or wrapped ESP sequence numbers. Windows/iKuai long-run
+  interoperability for this lifecycle implementation still needs live validation.
 
 The **security boundaries** — no key zeroization, single-core throughput, and
 MASQUE's capsule-mode head-of-line blocking — are stated separately in

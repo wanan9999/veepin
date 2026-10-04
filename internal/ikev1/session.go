@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/wanan9999/veepin/internal/cryptoutil"
@@ -45,6 +46,11 @@ const (
 // Result is the keyed ESP SA a completed exchange yields, oriented for the local
 // end and expressed in the transform IDs internal/ikev2/esp consumes.
 type Result struct {
+	// ByteLimit is the negotiated ESP octet limit per direction; zero is unlimited.
+	ByteLimit uint64
+	PeerID    []byte
+	Lifetime  time.Duration
+	Rekey     bool
 	EncrID    uint16 // ESP encryption transform (IKEv2 ID)
 	EncrKeyLn uint16 // encryption key length in bits
 	IntegID   uint16 // ESP integrity transform (IKEv2 ID)
@@ -133,7 +139,11 @@ type Handler interface {
 
 // Config parameters one IKE session.
 type Config struct {
-	Role Role
+	// ManageLifetime enables L2TP SA expiry and repeat Quick Mode exchanges.
+	ManageLifetime bool
+	IKELifetime    time.Duration
+	ESPLifetime    time.Duration
+	Role           Role
 	// Mode is the phase-1 exchange; the zero value is Main Mode.
 	Mode Mode
 	// Phase2 is what the phase-2 SA protects; the zero value is L2TP transport
@@ -207,8 +217,33 @@ const (
 // Session drives one IKEv1 exchange for a single peer. It is transport-neutral:
 // datagrams go out through cfg.Send and come in via HandleInbound.
 type Session struct {
-	cfg    Config
-	logger *vlog.Logger
+	dataDeadline      atomic.Int64 // owner-wide current ESP deadline, independent of control SA
+	offeredIKE        []ikeProposal
+	offeredESP        []espProposal
+	dataRekeyPending  atomic.Bool
+	usedQuickIDs      map[uint32]struct{}
+	controlGeneration uint64
+	baseGeneration    uint64
+	retireTimer       *time.Timer
+	renewalRoot       *Session
+	renewals          map[[8]byte]*Session
+	activeIKE         *Session
+	renewalPending    bool
+	renewAt           time.Time
+	peerID            []byte
+	retired           bool
+	quickParent       *Session
+	exchanges         map[uint32]*Session
+	exchangeExpiry    map[uint32]time.Time
+	lifetimeTimer     *time.Timer
+	ikeDeadline       time.Time
+	espDeadline       time.Time
+	rekeyAt           time.Time
+	closed            bool
+	rekeying          bool
+	established       bool
+	cfg               Config
+	logger            *vlog.Logger
 
 	mu    sync.Mutex
 	state sessionState
@@ -284,17 +319,20 @@ func InitiatorCookie(msg []byte) ([8]byte, bool) {
 // begins on the first inbound message.
 func NewSession(cfg Config) *Session {
 	logger := cfg.Logger
-	return &Session{cfg: cfg, logger: logger, psk: cfg.PSK}
+	s := &Session{cfg: cfg, logger: logger, psk: cfg.PSK}
+	if cfg.Role == Initiator {
+		_, _ = rand.Read(s.initCookie[:])
+	}
+	return s
 }
 
 // Start begins phase 1 (initiator only).
 func (s *Session) Start() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cfg.Role != Initiator || s.state != stInit {
+	if s.closed || s.cfg.Role != Initiator || s.state != stInit {
 		return
 	}
-	_, _ = rand.Read(s.initCookie[:])
 	if s.cfg.Mode == ModeAggressive {
 		if err := s.sendAM1(); err != nil {
 			s.failLocked(err)
@@ -326,11 +364,19 @@ func (s *Session) HandleInboundAuthenticated(pkt []byte, authenticated func()) {
 	defer s.mu.Unlock()
 	s.onAuthenticated = authenticated
 	defer func() { s.onAuthenticated = nil }()
-	if s.state == stFailed {
+	if s.cfg.ManageLifetime && s.renewalRoot == nil && s.established && !s.closed {
+		if handled := s.routeRenewalLocked(pkt, authenticated); handled {
+			return
+		}
+	}
+	if s.state == stFailed || s.closed {
 		return
 	}
 	h, first, rest, err := parseHeader(pkt)
 	if err != nil {
+		return
+	}
+	if s.cfg.ManageLifetime && s.established && !time.Now().Before(s.ikeDeadline) {
 		return
 	}
 	// Match exact retransmissions before checking the current state's cookie
@@ -355,12 +401,18 @@ func (s *Session) HandleInboundAuthenticated(pkt []byte, authenticated func()) {
 			return
 		}
 	}
-	// An established session still has one live exchange: the Informational one
-	// carrying dead-peer detection. Everything else after phase 2 is ignored.
 	if s.state == stDone {
-		if h.exchange == exchangeInformational && h.flags&flagEncryption != 0 {
-			if derr := s.handleDPD(h, first, rest); derr != nil {
-				s.logger.Printf("ikev1: DPD: %v", derr)
+		if s.cfg.ManageLifetime && s.quickParent == nil && h.exchange == exchangeQuick {
+			child := s.quickExchangeLocked(h, first, rest)
+			if child != nil {
+				// The child callback acquires the parent lock. Never hold both here.
+				s.mu.Unlock()
+				child.HandleInboundAuthenticated(pkt, authenticated)
+				s.mu.Lock()
+			}
+		} else if h.exchange == exchangeInformational && h.flags&flagEncryption != 0 {
+			if err := s.handleDPD(h, first, rest); err != nil {
+				s.logger.Printf("ikev1: informational: %v", err)
 			}
 		}
 		return
@@ -457,7 +509,7 @@ func (s *Session) armTimer() {
 func (s *Session) onRetransmit() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.state == stDone || s.state == stFailed || s.lastSent == nil {
+	if s.closed || s.state == stDone || s.state == stFailed || s.lastSent == nil {
 		return
 	}
 	s.retries++

@@ -127,6 +127,52 @@ func runClientServerLoopback(t *testing.T, shape int) {
 	down := makeIPv4(gateway, nc.AssignedIP)
 	serverTUN.in <- down
 	assertPacket(t, "server->client", clientTUN.out, down)
+	server.mu.Lock()
+	var peer *serverPeer
+	for _, candidate := range server.byCookie {
+		peer = candidate
+		break
+	}
+	server.mu.Unlock()
+	peer.mu.Lock()
+	originalPPP := peer.ppp
+	peer.mu.Unlock()
+	for n := range 6 {
+		peer.mu.Lock()
+		oldSPI := peer.inSPI
+		peer.mu.Unlock()
+		var err error
+		if n%2 == 0 {
+			err = peer.ike.Rekey()
+		} else {
+			err = peer.ike.RenewIKE()
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			peer.mu.Lock()
+			changed := peer.inSPI != oldSPI
+			samePPP := peer.ppp == originalPPP
+			peer.mu.Unlock()
+			if !samePPP {
+				t.Fatal("rekey replaced PPP session")
+			}
+			if changed {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("rekey %d did not finish", n)
+			}
+			time.Sleep(time.Millisecond)
+		}
+		clientTUN.in <- up
+		assertPacket(t, "up across rekey", serverTUN.out, up)
+		serverTUN.in <- down
+		assertPacket(t, "down across rekey", clientTUN.out, down)
+	}
+
 }
 
 func assertPacket(t *testing.T, dir string, out <-chan []byte, want []byte) {

@@ -23,6 +23,7 @@ package ikev1
 import (
 	"fmt"
 	"net"
+	"time"
 )
 
 // keyIDIdentity is the phase-1 identity Aggressive Mode carries for a
@@ -264,6 +265,11 @@ func (s *Session) respHandleAM3(first uint8, rest []byte) error {
 // XAuth, then Mode-Config, then Quick Mode. A profile with neither — L2TP —
 // goes straight to Quick Mode, which is what Main Mode has always done.
 func (s *Session) afterPhase1() error {
+	if s.cfg.ManageLifetime {
+		d := time.Duration(s.prop.lifeSeconds) * time.Second
+		s.ikeDeadline = time.Now().Add(d)
+		s.renewAt = time.Now().Add(d * 3 / 4)
+	}
 	if s.cfg.Role == Initiator {
 		switch {
 		case s.cfg.XAuth != nil:
