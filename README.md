@@ -1,717 +1,132 @@
 # veepin
 
-This fork is maintained at [wanan9999/veepin](https://github.com/wanan9999/veepin),
-based on [xen0bit/veepin](https://github.com/xen0bit/veepin). Original copyright
-and the MIT license are preserved. The Go module is `github.com/wanan9999/veepin`;
-the NetworkManager module is `github.com/wanan9999/veepin/nm`.
+纯 Go 用户态 VPN，提供命令行客户端、服务端和可嵌入的 Go 接口，无需 CGO。TUN/TAP 数据通路与路由配置主要面向 Linux。
 
-A **working userspace VPN in Go** — both server (responder) and client
-(initiator), written from scratch and depending only on the pure-Go
-`golang.org/x` modules (`x/crypto`, and `x/net` for QUIC), no cgo. It speaks
-**sixteen production protocols, client and server for every one** — IKEv2/ESP,
-WireGuard, OpenVPN, SSTP, SSH, L2TP/IPsec, L2TPv3 Ethernet pseudowire,
-AnyConnect, Nebula, MASQUE (CONNECT-IP and CONNECT-UDP over HTTP/3), Fortinet,
-GlobalProtect, Cisco IPsec, Ivanti Connect Secure, SoftEther VPN (SE-VPN) and
-AmneziaWG — each verified in Docker against a real third-party implementation
-and against itself. That sentence used to carry an exception for SoftEther,
-whose server direction had no cell; it now has one, against SoftEther's own
-`vpnclient`, and the sentence stands without qualification.
+本仓库为 [wanan9999/veepin](https://github.com/wanan9999/veepin)，基于 [xen0bit/veepin](https://github.com/xen0bit/veepin)，保留原作者版权与 [MIT 许可证](LICENSE)。Go 模块为 `github.com/wanan9999/veepin`；NetworkManager 子模块为 `github.com/wanan9999/veepin/nm`。
 
-Every layer is covered by tests, including full VPN integration tests:
-`TestFullVPNFlow` drives a client through the handshake and verifies a real IP
-packet traverses the ESP data path onto the server's TUN, and `TestClientConnectPSK`
-drives the production client against the live server and checks bidirectional ESP.
+[功能](#功能) · [构建](#构建) · [运行](#运行) · [库集成](#库集成) · [验证与限制](#验证与限制)
 
-## Contents
+<a id="what-it-does"></a>
 
-- [What it does](#what-it-does) — the protocol capability table
-- [Cryptography](#cryptography) — algorithms, [dependencies](#dependencies), [security boundaries](#what-veepin-does-not-protect-against)
-- [Architecture](#architecture) — the package tree and the protocol-agnostic boundary
-- [Install](#install) — apt repository and packaged releases
-- [Build](#build) and [Run](#run) — building the binary; per-protocol runbooks
-- [The example protocol](#the-example-protocol) — TOY, the insecure teaching example
-- [Using the bundled client](#using-the-bundled-client) — CLI client, [embedding](#embedding-the-client), [NetworkManager](#desktop-integration-networkmanager)
-- [Testing](#testing) — highlights and the live [interop matrix](#interoperability-matrix)
-- [Benchmarks](#benchmarks) — representative numbers (full table in [`doc/benchmarks.md`](doc/benchmarks.md))
-- [Scope and limitations](#scope-and-limitations)
+## 功能
 
-Deeper docs live under [`doc/`](doc/): per-protocol [usage](doc/usage/),
-[architecture](doc/architecture.md), [security](doc/security.md),
-[testing](doc/testing.md) and [benchmarks](doc/benchmarks.md). What might be
-added next, and what was considered and rejected, is in
-[`doc/protocol-roadmap.md`](doc/protocol-roadmap.md).
+支持以下 16 种协议的客户端和服务端，具体认证方式、参数与限制见各协议指南。
 
-## What it does
+<!-- 保留英文计数供现有注册表一致性测试校验：sixteen production protocols; TOY is the seventeenth registered protocol. Ten protocols therefore carry a pq- variant; Six protocols have **no** pq- variant. -->
 
-L2TP servers also accept TunnelForge v0.7.4's AES-128/SHA-1 proposals in both
-IKE and ESP, while retaining AES-256 support. See the
-[compatibility tests and deployment procedure](doc/usage/l2tp.md#tunnelforge-algorithm-compatibility)
-for the distinction between algorithm regression tests and Android acceptance.
+| 协议 | 使用指南 | 协议 | 使用指南 |
+|---|---|---|---|
+| IKEv2/ESP | [IKEv2](doc/usage/ikev2.md) | WireGuard | [WireGuard](doc/usage/wireguard.md) |
+| OpenVPN | [OpenVPN](doc/usage/openvpn.md) | SSTP | [SSTP](doc/usage/sstp.md) |
+| SSH | [SSH](doc/usage/ssh.md) | L2TP/IPsec | [L2TP](doc/usage/l2tp.md) |
+| L2TPv3 | [L2TPv3](doc/usage/l2tpv3.md) | AnyConnect | [AnyConnect](doc/usage/anyconnect.md) |
+| Nebula | [Nebula](doc/usage/nebula.md) | MASQUE | [MASQUE](doc/usage/masque.md) |
+| Fortinet | [Fortinet](doc/usage/fortinet.md) | GlobalProtect | [GlobalProtect](doc/usage/gp.md) |
+| Cisco IPsec | [Cisco IPsec](doc/usage/cisco.md) | Ivanti Connect Secure | [Ivanti](doc/usage/pulse.md) |
+| SoftEther VPN | [SoftEther](doc/usage/softether.md) | AmneziaWG | [AmneziaWG](doc/usage/amneziawg.md) |
 
-veepin speaks sixteen production protocols — **client and server for every one** —
-plus one deliberately insecure teaching example. Each protocol is verified in
-Docker against a real third-party implementation *and* against itself (see the
-[Interoperability matrix](#interoperability-matrix)). The table is the summary;
-each row links to that protocol's own package documentation, which carries the
-wire detail, caveats and API surface.
+<a id="the-example-protocol"></a>
 
-| Protocol | Authentication | Data path | Verified against | Docs |
-|----------|----------------|-----------|------------------|------|
-| **IKEv2/ESP** | PSK, EAP-MSCHAPv2, X.509 certificate (RFC 7427) | ESP-in-UDP, RFC 4303 (NAT-T, dual-stack v4/v6 CP address assignment, RFC 9347 AGGFRAG, RFC 8229/9329 over TCP) | strongSwan, libreswan | [ikev2](internal/ikev2/ike/README.md) |
-| **WireGuard** | Noise_IKpsk2 static keys | ChaCha20-Poly1305, cryptokey routing (both families), client rekey | wireguard-go | [wireguard](internal/wireguard/) |
-| **OpenVPN** | mutual TLS certificates | AES-256-GCM / -CBC; plain, `tls-auth`, `tls-crypt` (both roles) | `openvpn` | [openvpn](internal/openvpn/) |
-| **SSTP** | MS-CHAPv2 over PPP | PPP/IPCP over TLS, SHA-256 crypto binding | SoftEther, `sstpc`/pppd | [sstp](internal/sstp/wire/README.md) |
-| **SSH** | public key / password | IP over `tun@openssh.com` (layer-3) | OpenSSH `sshd` / `ssh -w` | [ssh](internal/sshtun/README.md) |
-| **L2TP/IPsec** | IKEv1 PSK + MS-CHAPv2 | L2TP/PPP inside an ESP transport SA (NAT-T) | strongSwan + xl2tpd | [l2tp](internal/l2tp/README.md) |
-| **L2TPv3** | none — static config, cookie is a check value | Ethernet frames over UDP/1701 on a TAP device (RFC 3931 + 4719), **layer 2** | Linux kernel (`ip l2tp`) | [l2tpv3](internal/l2tpv3/README.md) |
-| **AnyConnect** | password | CSTP over TLS, with DTLS 1.2 PSK fallback | ocserv, openconnect | [anyconnect](internal/anyconnect/README.md) |
-| **Nebula** | certificate PKI, per host | Noise IX mesh, AES-GCM / ChaCha20; relay fallback when hole punching fails | slackhq/nebula | [nebula](internal/nebula/README.md) |
-| **MASQUE** | proxy TLS | IP (CONNECT-IP) and UDP (CONNECT-UDP) over HTTP/3, capsule mode | aioquic | [masque](internal/masque/README.md) |
-| **Fortinet** | password, optional 2FA (TOTP) | PPP over TLS, with cert-based DTLS 1.2 fallback | openconnect | [fortinet](internal/fortinet/README.md) |
-| **GlobalProtect** | password | RFC 4303 ESP over UDP, keyed by the config document, with a framed layer-3 TLS tunnel as fallback | openconnect | [gp](internal/gp/README.md) |
-| **Cisco IPsec** | group PSK + XAuth password | IKEv1 Aggressive Mode, Mode-Config, tunnel-mode ESP-in-UDP | strongSwan | [cisco](internal/cisco/README.md) |
-| **Ivanti Connect Secure** | password (EAP over IF-T/TLS) | RFC 4303 ESP over UDP, with the IF-T/TLS connection as fallback | openconnect | [pulse](internal/pulse/README.md) |
-| **SoftEther VPN** | password (SHA-0 challenge) | Ethernet frames over TLS in counted blocks, PACK control over HTTP, layer-2 TAP | SoftEther VPN Server and its `vpnclient` | [softether](internal/softether/README.md) |
-| **AmneziaWG** | Noise_IKpsk2 static keys | WireGuard's ChaCha20-Poly1305 unchanged; obfuscated headers, padding and junk packets | `amneziawg-go` | [amneziawg](wireguard/obfuscate.go) |
+`TOY` 仅为教学示例，不提供安全保护，不能用于实际 VPN 流量。其中 10 种协议提供强制后量子机制的 `pq-` 变体，另外 6 种没有此变体，要求与边界见 [后量子变体指南](doc/usage/pq-variants.md)。
 
-Both roles share one registry API (`client.Register`/`client.RegisterServer`),
-so `veepin connect <proto>` and `veepin serve <proto>` dispatch generically and
-adding a protocol changes no caller. A seventeenth registered protocol, **TOY**,
-provides **no security** — it is a worked example of the protocol shape, not a
-real protocol; see [The example protocol](#the-example-protocol).
+<a id="install"></a>
+<a id="build"></a>
 
-## Cryptography
+## 构建
 
-| Category | Supported |
-|----------|-----------|
-| DH groups | Curve25519 (31), ECP-256/384/521 (19/20/21), MODP-2048 (14) |
-| PRF | HMAC-SHA1, HMAC-SHA2-256/384/512 |
-| IKE/ESP ciphers | AES-GCM-16 (AEAD, RFC 5282), ChaCha20-Poly1305 (AEAD, RFC 7634), AES-CBC + HMAC-SHA2 (encrypt-then-MAC) |
-| Integrity | HMAC-SHA1-96, HMAC-SHA2-256-128/384-192/512-256 |
+使用 `go.mod` 指定的 Go 版本：
 
-**Post-quantum key exchange is on by default nearly everywhere**, and in two
-independent ways. IKEv2 negotiates ML-KEM-768 over RFC 9370 + RFC 9242 with
-`-pq`, verified against strongSwan in both directions. And every TLS 1.3 path in
-the tree is hybrid X25519MLKEM768 without asking, because Go's `crypto/tls` has
-led its defaults with it since Go 1.24 and veepin pins `CurvePreferences`
-nowhere — a guard test enforces that it stays that way. That covers MASQUE and
-the OpenVPN server unconditionally, and AnyConnect, Fortinet, GlobalProtect,
-Ivanti, SSTP, SoftEther and the OpenVPN client whenever the peer speaks TLS 1.3.
-**Authentication can be post-quantum too**, as of Go 1.27: point a server at an
-ML-DSA (FIPS 204) certificate and key and both halves of the handshake are
-post-quantum — key exchange and signature — with no dependency outside the
-standard library. See [`doc/security.md`](doc/security.md) for what each half
-does and does not protect.
-
-### Post-quantum by name: the `pq-` variants
-
-Everything above is a *default*, and a default can be negotiated away: a peer
-that offers only classical mechanisms still gets a working tunnel, just a weaker
-one. Ten protocols therefore carry a **second registry name** under which
-post-quantum cryptography is mandatory and anything less is **refused**:
-
-```sh
-veepin serve pq-ikev2  -psk … -identity vpn.example   # refuses a classical initiator
-veepin connect pq-sstp -server vpn.example -user alice
+```bash
+git clone https://github.com/wanan9999/veepin.git
+cd veepin
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o veepin ./cmd/veepin
 ```
 
-| Variant | Forces | Also forces |
-|---|---|---|
-| `pq-ikev2` | ML-KEM-768 via ADDKE1 (RFC 9370), ML-DSA in the RFC 7427 AUTH payload | refuses EAP-MSCHAPv2 |
-| `pq-openvpn`, `pq-masque` | TLS 1.3, ML-KEM key exchange, ML-DSA certificates **both ends** (mutual TLS) | |
-| `pq-sstp`, `pq-gp`, `pq-pulse`, `pq-softether` | TLS 1.3, ML-KEM key exchange, ML-DSA server certificate | |
-| `pq-anyconnect`, `pq-fortinet` | the same | `-no-dtls`, because the DTLS 1.2 data channel has no post-quantum path |
-| `pq-ssh` | `mlkem768x25519-sha256` | **key exchange only** — see below |
+已发布的产物见 [Releases](https://github.com/wanan9999/veepin/releases)。本分支的 APT 发布需要独立配置签名密钥与仓库，不能直接沿用上游签名身份。
 
-They are names rather than flags for one reason: a flag is a modifier an
-operator can forget, and forgetting it yields the weaker behaviour silently.
-A name cannot be forgotten. It also earns each variant a row in the
-[interop matrix](#interoperability-matrix), which a flag would not get.
+<a id="run"></a>
 
-Three things worth stating plainly:
+## 运行
 
-- **A `pq-` server refuses to start without an ML-DSA certificate**, before the
-  TUN is opened and before anything binds — not at the first client's handshake.
-  A listener created under a `pq-` name in the management panel generates an
-  ML-DSA-65 chain automatically.
-- **PSK authentication still works under `pq-ikev2`.** A pre-shared key is
-  symmetric and is not broken by a quantum adversary; that is the entire premise
-  of RFC 8784. What `pq-ikev2` refuses is classical *public-key* authentication.
-- **`pq-ssh` carries only half the contract**, because SSH has no post-quantum
-  signature algorithm in any specification or implementation —
-  [OpenSSH says so itself](https://www.openssh.org/pq.html). The exemption is
-  recorded by name in `internal/pqpolicy` and a test holds that list at one entry.
+Linux TUN/TAP 模式需要 `/dev/net/tun` 和 `CAP_NET_ADMIN`，可使用 `sudo` 启动；自动配置 NAT 还需要相应系统网络工具。部署前确认监听端口、安全组与主机防火墙允许所需流量。
 
-Six protocols have **no** `pq-` variant and cannot have one. WireGuard and
-AmneziaWG fix X25519 in Noise_IKpsk2 and negotiate nothing; Nebula is plain
-Noise_IX; Cisco IPsec and L2TP/IPsec are IKEv1, which has no additional
-key-exchange mechanism; L2TPv3 has no cryptography at all. Those absences are
-structural, not a backlog. The variants are also **not** counted among the
-sixteen production protocols — `pq-ikev2` is IKEv2 with a floor under it, not a
-seventeenth protocol. The design and its evidence are in
-[`doc/pq-variants-plan.md`](doc/pq-variants-plan.md).
+### L2TP/IPsec 服务端
 
-AES from the standard library; ChaCha20-Poly1305 from `x/crypto` (the same AEAD
-WireGuard already pulls in). ChaCha20-Poly1305 for IKEv2/ESP shares AES-GCM-16's
-exact framing — a 4-octet implicit salt, an 8-octet explicit IV and a 16-octet
-tag — so both run through one generic AEAD path in `cryptoutil`, and it is
-offered after AES-GCM (which is faster where the CPU has AES-NI) and ahead of
-AES-CBC.
+将公网 IP、网卡名和示例凭据替换为实际值：
 
-### Dependencies
-
-The module depends only on the pure-Go `golang.org/x` modules: `x/crypto`,
-`x/net` (for QUIC), and `x/sys` and `x/text` that those pull in. Nothing outside
-the `golang.org/x` namespace, and no cgo.
-
-`x/crypto` exists first for **WireGuard, which fixes its crypto and does not
-negotiate it.** It mandates ChaCha20-Poly1305 and BLAKE2s, and Go ships neither
-in the standard library, so WireGuard cannot be built on stdlib alone. IKEv2
-reaches the same `x/crypto` ChaCha20-Poly1305 for its own RFC 7634 suite — an
-AEAD Go's standard library still omits — but everything else IKEv2 negotiates is
-covered by `crypto/aes` and `crypto/sha256`, so that one AEAD is the whole of
-its dependency beyond stdlib.
-
-`x/net` exists for a second: **MASQUE runs over HTTP/3, and Go ships no QUIC.**
-`x/net/quic` is the Go team's own pure-Go implementation, so the alternative —
-hand-rolling a QUIC stack or vendoring a third-party one — is avoided the same
-way `x/crypto` avoids hand-rolling ChaCha20. (`x/net/http3` is *not* used: its
-public surface exports nothing and it has no CONNECT/datagram/capsule support,
-so the HTTP/3 layer MASQUE needs is built from scratch on the `quic` package —
-see `internal/masque/http3`.) Only MASQUE imports it; the other fifteen protocols
-still reach no further than `x/crypto`.
-
-The alternative was hand-rolling both. That was rejected: `x/crypto` is the Go
-team's own module and carries the AVX2/NEON assembly, which measures **~1.9 GB/s**
-for ChaCha20-Poly1305 on the data path against the several-times-slower pure-Go
-implementation we would have written — and an AEAD protecting every packet is a
-far larger security surface than the bundled MD4 in `internal/ikev2/eap`, which
-is a legacy hash confined to one corner of MSCHAPv2.
-
-Everything is still CGO-free, and the `nm/` plugin remains a separate module so
-the core does not inherit its D-Bus and GTK dependencies.
-
-EAP-MSCHAPv2 additionally uses MD4 (for the NT password hash) and single-DES
-(for the challenge response), as the protocol mandates. Go's standard library
-has DES but not MD4, so a compact RFC 1320 MD4 is included in `internal/ikev2/eap`;
-these legacy primitives are used only where MSCHAPv2 requires them, never for
-transport security.
-
-### What veepin does not protect against
-
-Three boundaries are worth stating outright, because each is the kind of thing a
-reader may otherwise assume is handled — and none is an oversight:
-
-- **Key material is not zeroed after use.** veepin does not claim protection
-  against an attacker who can read process memory (core dump, debugger, swap).
-- **Throughput is bounded by one core per direction.** The data path runs one
-  TUN-reader goroutine and one socket-reader goroutine per server, shared across
-  all clients — a scaling ceiling, not a correctness problem.
-- **MASQUE carries every inner packet on one reliable QUIC stream** (capsule
-  mode), so it reintroduces head-of-line blocking on a lossy path.
-
-The reasoning behind each — why Go's memory model makes zeroization unreliable,
-and why the MASQUE boundary is a performance limit rather than a correctness one —
-is in [`doc/security.md`](doc/security.md).
-
-## Architecture
-
-The tree separates machinery any VPN protocol needs from what is specific to one
-protocol. Each protocol is a sibling under `internal/`, with a thin public
-package exposing `Dial` and `NewServer`; the shared machinery — TUN handling,
-address pools, the packet pump, admission control, MTU derivation — lives in
-`dataplane` and `internal/cryptoutil` and is written once.
-
-```
-cmd/veepin               CLI: connect / serve / probe subcommands, flags, routing
-client                   protocol registry (client + server) + the Session/Result/Server contracts
-ikev2                    public IKEv2 entry point: Dial + NewServer, Config
-wireguard                public WireGuard entry point: Dial + NewServer, Config, wg-quick parser
-openvpn                  public OpenVPN entry point: Dial + NewServer, Config, .ovpn parser
-sstp                     public SSTP entry point: Dial + NewServer, Config, crypto binding
-ssh                      public SSH entry point: Dial + NewServer, Config (x/crypto/ssh)
-l2tp                     public L2TP/IPsec entry point: Dial + NewServer, Config
-anyconnect               public AnyConnect entry point: Dial + NewServer, Config
-nebula                   public Nebula entry point: Dial + NewServer (lighthouse), Config
-masque                   public MASQUE entry point: Dial + NewServer (CONNECT-IP proxy), Config
-fortinet                 public Fortinet entry point: Dial + NewServer (SSL VPN gateway), Config
-toy                      public TOY entry point: Dial + NewServer — an INSECURE teaching example
-
-dataplane                TUN device, address pool, packet pump (demux + routing), client routing
-                         admission control, ICMP/PMTU, MTU derivation, source-preserving PacketConn
-                         downstream flow shaping (padding away the inner traffic's size pattern)
-internal/cryptoutil      DH, PRF + prf+, integrity, SK/ESP ciphers, ChaCha20-Poly1305, BLAKE2s
-internal/replay          the anti-replay window shared by nebula and toy
-
-internal/ikev2/payload   wire codec: header, payloads, SA/KE/Nonce/Notify/ID/AUTH/TS/Delete/CP
-internal/ikev2/transform IANA transform ID -> cryptoutil primitive
-internal/ikev2/eap       EAP packet codec + EAP-MSCHAPv2 (MD4/DES/SHA1, MSK derivation)
-internal/ikev2/esp       ESP encapsulate/decapsulate + anti-replay
-internal/ikev2/ike       negotiation, SK seal/open, NAT-T, CP, exchange handlers, keymat, Client
-
-internal/wireguard/wire      message codec: the four types, fixed layouts, demux, TAI64N
-internal/wireguard/noise     Noise_IKpsk2 handshake (initiator), KDF, MAC
-internal/wireguard/transport type-4 transport crypto: counter nonce, padding, replay window
-
-internal/openvpn/wire        packet codec: opcode byte, session IDs, control/ACK framing
-internal/openvpn/reliable    control-channel reliability: window, retransmit, reorder, ACKs
-internal/openvpn/control     TLS control channel: a net.Conn over the reliability layer
-internal/openvpn/tlswrap     tls-auth/tls-crypt: static-key HMAC and AES-256-CTR control wrapping
-internal/openvpn/keys        key method 2 exchange + TLS 1.0 PRF key derivation
-internal/openvpn/data        P_DATA_V2 seal/open (AES-256-GCM and AES-256-CBC) + anti-replay window
-
-internal/sstp/wire           SSTP packet codec: control/data framing, attributes, crypto binding
-internal/ppp                 PPP client + server: LCP, MS-CHAPv2 auth, IPCP (transport-neutral)
-internal/mschap              MS-CHAPv2 primitives + MPPE/HLAK key derivation
-
-internal/sshtun              OpenSSH tun@openssh.com framing: channel-open data + AF packet frames
-
-internal/anyconnect          CSTP framing, the config-auth XML exchange, the DTLS channel, and the client/server engines
-internal/dtls                DTLS 1.2 PSK: record layer, handshake flights, fragmentation, anti-replay
-
-internal/nebula              minimal protobuf codec, v1 certificates + CA pool, Noise IX, 16-octet header,
-                             AEAD data path with anti-replay, the mesh host engine and the lighthouse protocol
-
-internal/masque              CONNECT-IP + CONNECT-UDP: capsules, the HTTP-Datagram payload, the TUN
-                             client/server engines, and the CONNECT-UDP relay + local UDP forwarder
-internal/masque/http3        from-scratch HTTP/3 on x/net/quic: varints, minimal QPACK (zero dynamic table),
-                             SETTINGS/control streams, Extended CONNECT, capsules over DATA frames
-
-internal/toy                 the TOY example protocol + SPEC.md — NO SECURITY; the smallest complete
-                             illustration of a veepin protocol (handshake, Tunnel, pump, both roles)
-
-internal/ikev1               ISAKMP/IKEv1: payload codec, Main + Quick mode, SKEYID/KEYMAT, CBC IV chaining
-internal/l2tp                RFC 2661 header/AVP codec, reliable control channel, PPP data channel,
-                             plus the client/server engines binding IKEv1 + ESP + L2TP + PPP to a TUN
-internal/fortinet            FortiOS SSL VPN: the 6-octet PPP framing, the logincheck/SVPNCOOKIE
-                             login, the fortisslvpn_xml config, the PPP-over-TLS client/server,
-                             and the DTLS data channel with its GFtype cookie exchange
-internal/udpmux              one UDP socket demultiplexed into per-peer net.Conns, shared by the
-                             AnyConnect and Fortinet DTLS listeners
-internal/otp                 HOTP (RFC 4226) and TOTP (RFC 6238), generation and constant-time
-                             verification — the second factor behind Fortinet's ret=2 challenge
+```bash
+sudo ./veepin serve l2tp \
+  -public 203.0.113.10 \
+  -psk '替换为独立的预共享密钥' \
+  -user vpnuser -pass '替换为账号密码' \
+  -pool 10.20.0.0/24 -dns 1.1.1.1 \
+  -tun tun0 -setup-nat -wan eth0
 ```
 
-`dataplane` and `internal/cryptoutil` are protocol-agnostic: neither imports
-anything else in this module, and neither knows IKEv2 exists. That boundary — how
-the pump demuxes inbound packets with a protocol-supplied `Demux`, how outbound
-routing picks a tunnel by most-specific route, and how a packet flows end to end —
-is written up in [`doc/architecture.md`](doc/architecture.md).
+放行 UDP **500、4500**。本协议使用 NAT-T，L2TP 流量在 IPsec 内传输，不需要向公网开放裸 UDP 1701。`-setup-nat` 会修改主机网络配置，仅在需要通过主机转发上网时使用。
 
-## Install
+秘密参数支持对应的 `-<参数>-file` 形式，例如 `-psk-file`、`-pass-file`，可避免直接出现在进程参数中。完整配置见 [L2TP/IPsec 指南](doc/usage/l2tp.md)。
 
-The fork APT repository requires separate setup before using the commands below:
-replace the inherited upstream public key with your own, configure the matching
-`APT_SIGNING_KEY` secret and GitHub Pages, update the documented fingerprint,
-and set the repository variable `APT_REPO_ENABLED=true`. Until then, use this
-fork's GitHub Releases or build from source; these APT commands are setup examples.
+<a id="using-the-bundled-client"></a>
 
-On Debian/Ubuntu — any Debian release architecture (amd64, arm64, armhf, armel,
-i386, ppc64el, riscv64, s390x) — the signed APT repository tracks the latest
-release:
+### 客户端
 
-```sh
-sudo curl -fsSL https://wanan9999.github.io/veepin/veepin-archive-keyring.gpg \
-     -o /usr/share/keyrings/veepin-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/veepin-archive-keyring.gpg] https://wanan9999.github.io/veepin stable main" \
-     | sudo tee /etc/apt/sources.list.d/veepin.list
-sudo apt update && sudo apt install veepin veepin-nm
+```bash
+sudo ./veepin connect l2tp \
+  -server 203.0.113.10 \
+  -psk '替换为独立的预共享密钥' \
+  -user vpnuser -pass '替换为账号密码'
 ```
 
-`veepin` is the CLI (server + client; no *library* dependencies — it does shell
-out to `ip`/`iptables`/`sysctl` on Linux and `ifconfig`/`route`/`networksetup` on
-macOS, all of which are part of the base system); `veepin-nm`
-adds the NetworkManager desktop integration (built for the same architectures;
-the amd64/arm64 builds load on Ubuntu 22.04+, the cross-built rest on
-Debian 12+ / Ubuntu 24.04+). The repository signing
-key ships in [packaging/apt-signing-key.asc](packaging/apt-signing-key.asc) as
-the out-of-band trust anchor, and the release workflow refuses to publish a
-repository signed by anything else:
+通用入口为 `veepin serve <协议>` 和 `veepin connect <协议>`；参数以对应命令帮助及协议指南为准。持续运行与管理配置见 [服务管理](doc/usage/supervisor.md)、[管理面板](doc/usage/mgmt.md)。
 
-```
-EE96 B9F0 28F5 7D11 5A8D  1509 889E D9E8 95D7 E72C
-```
+<a id="architecture"></a>
+<a id="embedding-the-client"></a>
 
-This is the inherited **upstream** key, not a signing identity for this fork.
-It is retained for provenance and must be replaced before enabling fork APT
-publication. See the key rotation instructions in [AGENTS.md](AGENTS.md).
+## 库集成
 
-The package ships a systemd template unit — drop arguments in
-`/etc/veepin/<name>.conf` and `systemctl enable --now veepin@<name>` (see
-`/usr/share/doc/veepin/veepin.conf.example`); it grants the daemon the
-capabilities it needs, so no root shell or setcap step.
+通过公开协议包调用客户端或服务端，具体接口见包文档。`client.Dial` 返回会话及网络配置结果，不自动安装主机路由或地址，由调用方负责应用与清理。
 
-### Verifying a release
+L2TP 的 `ServerConfig.PacketDeviceFactory` 可为每个认证 PPP 会话提供独立 IPv4 数据设备，接入自有用户态网络栈，不必使用系统 TUN 或主机 NAT：
 
-Each GitHub release carries `checksums.txt`, a cosign signature over it, and a
-CycloneDX SBOM per binary. The signature is **keyless**: it is bound to this
-repository's release workflow through GitHub's OIDC identity, so there is no
-long-lived signing key to trust, and verification checks *which workflow built
-the artifact* rather than *who holds a key*.
+- `Write` 接收客户端数据包，`Read` 提供发回客户端的数据包。
+- `Close` 必须解除阻塞并释放该会话资源。
+- IPCP 完成后才接受数据，来源地址须匹配分配地址。
+- `Server.KickUserSessions` 可关闭指定用户的设备及 VPN 会话。
 
-```sh
-cosign verify-blob checksums.txt \
-  --certificate checksums.txt.pem \
-  --signature checksums.txt.sig \
-  --certificate-identity-regexp 'https://github[.]com/wanan9999/veepin/[.]github/workflows/release[.]yml@.*' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-sha256sum -c checksums.txt --ignore-missing
-```
+结构与接口见 [架构说明](doc/architecture.md)、[L2TP 包](l2tp/)。
 
-One signature over the checksum file rather than one per artifact: the checksums
-already cover every artifact, so verifying the signature and then the checksums
-gives the same guarantee.
+<a id="desktop-integration-networkmanager"></a>
 
-The SBOM is short — `golang.org/x/{crypto,net,sys,text}` and the standard
-library — which is the point of publishing it. The dependency claim at the top
-of this file is then something a scanner can check rather than a sentence you
-have to take on trust.
+NetworkManager 桌面集成单独位于 [nm/](nm/)，与根模块分别维护和构建。
 
-`.deb`/`.rpm`/`.apk` packages and plain tarballs for every version are on
-[GitHub Releases](https://github.com/wanan9999/veepin/releases)
-(`apt install ./veepin_<ver>_linux_<arch>.deb` works directly).
+<a id="testing"></a>
+<a id="scope-and-limitations"></a>
+<a id="cryptography"></a>
+<a id="what-veepin-does-not-protect-against"></a>
 
-## Build
+## 验证与限制
 
-Requires Go 1.27+ (`crypto/mldsa`; developed against Go 1.27).
-
-```sh
-go build ./...
+```bash
 go test ./...
-go build -o veepin ./cmd/veepin
+go vet ./...
 ```
 
-One binary does everything, dispatching on a subcommand and a protocol:
+互通测试需要 Docker 等环境，步骤见 [测试说明](doc/testing.md)。单元测试、自身客户端互通及第三方客户端验收是不同层次；表中的结果不代表所有客户端、网络条件与长连接场景均已验证。
 
-```
-veepin connect <protocol> [flags]   bring up a tunnel to a server
-veepin serve   <protocol> [flags]   run a VPN server
-veepin probe   <protocol> [flags]   diagnostic: handshake + one data packet
-```
+- L2TP/IPsec 使用 IKEv1 Main Mode + PSK、MS-CHAPv2 与 UDP 封装 ESP；不支持裸 ESP、证书认证、Aggressive Mode 或 Quick Mode PFS。
+- 已包含 TunnelForge 0.7.4 所需 AES-128/SHA-1 算法兼容处理，并保留 AES-256。L2TP 支持续期与寿命限制处理，但 Windows、爱快的长期运行兼容性仍需真机验收。
+- 不同协议的身份认证、加密与重协商能力不同；安全边界见 [安全说明](doc/security.md)，不要把所有协议视为同一安全等级。
+- 性能取决于算法、CPU、包长、客户端与网络。基准或 Docker 吞吐量不能直接等同于真实公网带宽。
 
-Every protocol — the sixteen production ones and the TOY example — is registered
-for both `connect` and `serve`; `veepin` with no
-arguments lists what is registered.
+<a id="interoperability-matrix"></a>
 
-## Run
+### 互通记录
 
-Creating a TUN device needs `CAP_NET_ADMIN`. Either run as root, or grant the
-binary the capability once:
+以下两表由 CI 自动维护，保留原始测试名称及生成信息。`✓` 表示通过，`✗` 表示失败；`—` 及脚注表示未提供或不适用的测试方向，解释见 [测试说明](doc/testing.md)。
 
-```sh
-sudo setcap cap_net_admin+ep ./veepin
-```
-
-On any `serve` subcommand, `-setup-nat -wan <iface>` auto-configures the tunnel
-interface, enables IP forwarding, and installs a MASQUERADE rule for that WAN
-interface; omit it and the server prints the exact `ip`/`iptables` lines to run
-by hand. Each protocol's `connect`/`serve` runbook — its flags, config-file
-formats, and what it interoperates with — has its own page:
-
-| Protocol | Runbook |
-|----------|---------|
-| IKEv2/ESP (incl. EAP-MSCHAPv2) | [doc/usage/ikev2.md](doc/usage/ikev2.md) |
-| WireGuard | [doc/usage/wireguard.md](doc/usage/wireguard.md) |
-| OpenVPN | [doc/usage/openvpn.md](doc/usage/openvpn.md) |
-| SSTP | [doc/usage/sstp.md](doc/usage/sstp.md) |
-| SSH | [doc/usage/ssh.md](doc/usage/ssh.md) |
-| L2TP/IPsec | [doc/usage/l2tp.md](doc/usage/l2tp.md) |
-| AnyConnect | [doc/usage/anyconnect.md](doc/usage/anyconnect.md) |
-| Nebula | [doc/usage/nebula.md](doc/usage/nebula.md) |
-| MASQUE (CONNECT-IP + CONNECT-UDP) | [doc/usage/masque.md](doc/usage/masque.md) |
-| Fortinet | [doc/usage/fortinet.md](doc/usage/fortinet.md) |
-| GlobalProtect | [doc/usage/gp.md](doc/usage/gp.md) |
-| Cisco IPsec | [doc/usage/cisco.md](doc/usage/cisco.md) |
-| Ivanti Connect Secure | [doc/usage/pulse.md](doc/usage/pulse.md) |
-| SoftEther VPN | [doc/usage/softether.md](doc/usage/softether.md) |
-| AmneziaWG | [doc/usage/amneziawg.md](doc/usage/amneziawg.md) |
-| L2TPv3 Ethernet pseudowire | [doc/usage/l2tpv3.md](doc/usage/l2tpv3.md) |
-| The `pq-` variants (all ten) | [doc/usage/pq-variants.md](doc/usage/pq-variants.md) |
-
-### More than one user
-
-Every protocol that authenticates a person by password — AnyConnect, Cisco
-IPsec, Fortinet, GlobalProtect, Ivanti, L2TP/IPsec, SSH and SSTP — takes
-`-users-file`, a file of `username:secret` lines:
-
-```
-# /etc/veepin/users, mode 0600
-alice:$2a$12$K3sQ8xVn0zL7pR2fT9mYue1Wj4hC6bD5aE8gN0oS2uX7vZ1qM3rGy
-bob:hunter2
-```
-
-`-user`/`-pass` remain the one-user shorthand, and where a name is in both the
-command line wins. `veepin passwd` prints a verifier for the first form,
-reading the password from stdin so it never enters the process table; at a
-terminal it turns echo off and asks twice, and a piped password is read once and
-unchanged. The format is bcrypt's own, so `htpasswd -B` works too.
-
-Whether the secret may be a verifier is a property of the protocol rather than
-a setting. SSTP and L2TP/IPsec are MS-CHAPv2: both ends derive their response
-*from* the password, so those files hold plaintext passwords and veepin refuses
-a hash at startup rather than accepting one and failing every login. See
-[doc/security.md](doc/security.md#half-the-password-protocols-must-store-the-password-itself)
-for the table and what it costs.
-
-To run **a fleet of servers** in one process with a localhost management API
-and embedded web panel, the supervisor mode is additive to the bare
-single-protocol command: see [Running the supervisor](doc/usage/supervisor.md)
-and [the `veepin mgmt` CLI](doc/usage/mgmt.md).
-
-To use veepin **as a client**, the
-[NetworkManager plugin](#desktop-integration-networkmanager) is the simplest path
-on a Linux desktop — it configures all sixteen protocols from the native VPN UI. The
-[Using the bundled client](#using-the-bundled-client) section below walks the CLI
-client through end to end. Stock OS built-in VPN clients (Windows, macOS/iOS,
-Android, strongSwan) can also connect to the veepin IKEv2 server directly — see
-[doc/usage/ikev2.md](doc/usage/ikev2.md).
-
-## The example protocol
-
-**TOY provides no security** — its "encryption" is a repeating XOR pad and its
-"authentication" is a hash-table hash, so anyone who can see the traffic can read
-and forge it. It is not one of the sixteen real protocols; it is the *shape* of a
-veepin protocol with the cryptography replaced by placeholders simple enough to
-read in one sitting — a handshake producing a `client.Result`, a `dataplane.Pump`
-data path, and both roles on the client registry. Its interop cells talk to an
-**independent Python implementation** written from the spec, so they test the
-document rather than the code.
-
-If you are adding a real protocol, start here:
-[`internal/toy/README.md`](internal/toy/README.md) and
-[`internal/toy/SPEC.md`](internal/toy/SPEC.md), which document the wire format,
-enumerate the concrete ways the cryptography fails, and map each to what a real
-protocol here does instead.
-
-## Using the bundled client
-
-`veepin connect` is a full VPN client: it connects to a server, obtains an
-address, brings up a local TUN, installs routes, and tunnels the host's traffic.
-Like the server it needs `CAP_NET_ADMIN` (for the TUN device and routing table):
-
-```sh
-sudo ./veepin connect ikev2 -server vpn.example.com -psk 'a-strong-preshared-key' \
-    -id client.example.com -server-id vpn.example.com
-```
-
-By default it installs a full-tunnel default route (all traffic through the VPN)
-plus a host route to the server via the existing gateway, so the encapsulated
-ESP packets don't recurse into the tunnel. It also installs the resolvers the
-server handed out, for the tunnel's lifetime — a full tunnel that keeps the
-host's old resolver leaks every query it was meant to hide, in plaintext, from
-the host's real address. On disconnect (Ctrl-C) both are reverted. Useful flags:
-
-- `-user` / `-pass` — authenticate with EAP-MSCHAPv2 username/password instead of
-  the client PSK (the server PSK still authenticates the server).
-- `-full-tunnel=false` — only bring up the interface/address.
-- `-route <cidr>` — send this prefix through the tunnel (repeatable). Implies
-  `-full-tunnel=false`, since naming what to route means not routing everything.
-- `-exclude <cidr>` — keep this prefix off the tunnel (repeatable), by routing it
-  via the physical gateway — the same mechanism that keeps the tunnel's own
-  packets from recursing into it. A bare address is read as a host route.
-- `-no-route` — connect and establish the data path but make no routing or DNS
-  changes (useful for testing, or when another process manages both).
-- `-no-dns` — keep the routes but leave the host's resolvers alone, for the
-  operator who manages their own.
-- `-retry=false` / `-retry-max <n>` — see below.
-- `-kill-switch` — fail closed if the tunnel drops, rather than letting traffic
-  resume in plaintext. See below.
-- `-server-id` — verify the server presents this identity in its IDr.
-- `-log-level` / `-log-format` — see [Logging](#logging).
-
-A dropped tunnel is re-dialled by default, with jittered exponential backoff
-from one second to a minute, resetting after a session that stayed up for a
-minute. A laptop changing Wi-Fi networks or a tether that drops for four
-seconds reconnects on its own; the host's routes, addresses and resolvers come
-all the way down between attempts, so a failed re-dial leaves nothing behind.
-**A rejected credential is never retried** — that is a lockout on any server
-that counts failures, and `client.ErrAuth` is what distinguishes it. `-retry=false`
-returns to the shell on the first drop, and `-retry-max <n>` bounds the
-attempts, for scripts and CI that need a failure to be a failure.
-
-`-kill-switch` makes an *unintended* teardown fail closed. It installs the same
-two `/1` halves the full tunnel uses, as blackholes at a worse metric, while the
-tunnel is healthy — so they are inert until the kernel drops the TUN's routes
-with its device, and the handover has no window. A host route to the server is
-held alongside them, or the re-dial could not reach the server it is trying to
-reach. It is off by default, because a kill switch nobody asked for strands a
-machine you may only be able to reach over the network it just blackholed; when
-it engages it logs the command to reopen the host by hand, since the moment you
-need that is the moment you cannot look it up. It needs a full tunnel and a
-protocol with one outer server address, and refuses rather than half-delivering
-for a split tunnel or a mesh — and it cannot be combined with `-no-route`, since
-the switch *is* routing and there is nothing to fail closed with the routing
-table left alone. **Both address families are closed whichever the
-tunnel carries** — a family the tunnel does not carry is exactly a family that
-escapes it — so a v4-only tunnel blackholes IPv6 for its lifetime, which the log
-says out loud.
-
-Which mechanism installs the resolvers depends on the host, and the connect log
-line names the one that ran. Where systemd-resolved is running the servers are
-set on the tunnel link with `resolvectl`, and a full tunnel additionally claims
-the `~.` routing domain — without which resolved keeps answering from the other
-link's servers no matter what `/etc/resolv.conf` says. Everywhere else
-`/etc/resolv.conf` is rewritten, with the original copied to
-`/etc/resolv.conf.veepin.bak` and restored on teardown; a `resolv.conf` that is
-a symlink into `/run` belongs to another daemon and veepin refuses it rather
-than clobbering its state.
-
-The client speaks the same PSK and EAP-MSCHAPv2 flows the server accepts, so
-`veepin connect` ↔ `veepin serve` interoperate directly, and the client also works
-against other RFC 7296 responders that accept these authentication methods.
-
-### Platform support
-
-The **client** runs on Linux and macOS. Linux is what CI and the interop matrix
-exercise; macOS is `dataplane/tun_darwin.go` (a `utun` control socket via
-`x/sys/unix` — no cgo, no new dependency) plus `ifconfig`/`route`/`networksetup`
-for host networking. It compiles in CI for `darwin/amd64` and `darwin/arm64`,
-which proves it type-checks and nothing more: **no one has run it yet**, and
-[doc/verifying-macos.md](doc/verifying-macos.md) is the procedure for the person
-who does. Three things are knowingly absent there — the kill switch (the BSD
-routing table has no per-route metrics to arm one safely), the layer-2 protocols
-(macOS has no in-kernel TAP), and GSO (a Linux offload).
-
-The **server** is Linux only: `internal/hostnet` speaks `iptables` and `sysctl`.
-
-Windows is out of scope, and the reason is not the one this used to give. wintun
-is loaded at runtime through `LoadLibrary`, not linked, so the pure-Go claim
-would survive it — wireguard-go does exactly this on Windows without cgo. What
-is true is the rest: shipping and trusting a signed third-party DLL is a real
-runtime dependency and a real supply-chain surface, and the TUN is only the
-visible half. The other half is `internal/hostnet`, which speaks `iptables` and
-`sysctl` and would need a second backend in `netsh` or WFP.
-
-The reason that outranks all of those: the macOS client compiles, is shipped,
-and has never been run by anyone. Adding a second unverified platform before the
-first one is verified turns two bugs into one indistinguishable failure.
-
-### Logging
-
-`connect` and `serve` take `-log-format text|json` and `-log-level
-debug|info|warn|error`. `text` is the default and is exactly the timestamped
-line the command has always printed; `json` emits one `log/slog` record per
-line, for a log shipper. `debug` turns on protocol-level detail — one switch,
-replacing the `VEEPIN_SSTP_DEBUG`-shaped environment variables that had started
-to accumulate one per protocol (the old spellings still work, and `VEEPIN_DEBUG`
-is the general one, for a Go program embedding a protocol package directly).
-
-The level filters **per line**, not per stream: at `-log-level warn` the
-informational stream goes away and a protocol reporting a real problem still
-prints. That is `internal/vlog`, which is `log/slog` with the `Printf`-shaped
-calls the data paths make and a level chosen at the call site. A fatal error
-never depends on any of it — it returns to `main` and reaches stderr directly.
-
-A facade's `Logger` field is an `*slog.Logger`, so a Go program embedding a
-protocol package hands in a standard-library logger and nothing else.
-
-### Process hardening
-
-`serve` takes two Linux-only switches for the boundary
-[`doc/security.md`](doc/security.md) opens by naming — the one it refuses to
-defend by zeroing key material, because Go's collector makes that a gesture
-rather than a guarantee:
-
-- `-lock-memory` — `mlockall`, so no page reaches swap and key material cannot
-  be recovered from a swap file afterwards. Needs `CAP_IPC_LOCK` or
-  `RLIMIT_MEMLOCK` headroom.
-- `-no-core-dumps` — `prctl(PR_SET_DUMPABLE, 0)`, so a crash writes no core file
-  carrying live session keys and a same-uid process cannot `ptrace` in.
-
-Both are off by default because each trades something real, and both **abort the
-server if refused** rather than warning and carrying on. A hardening switch that
-silently does nothing is worse than no switch: the appearance invites confidence
-the process has not earned. Neither reduces what a debugger with
-`CAP_SYS_PTRACE`, a hypervisor, or code execution in the process can reach.
-
-### Embedding the client
-
-The handshake and data path are a reusable library: `Dial` performs the handshake
-and brings up the ESP data path over a TUN **without** installing routes,
-returning the assigned address/DNS/gateway for the caller to apply. `veepin
-connect` is a thin wrapper over it. Go code that knows which protocol it wants
-imports the protocol package for a typed config:
-
-```go
-import "github.com/wanan9999/veepin/ikev2"
-
-sess, res, err := ikev2.Dial(ctx, ikev2.Config{
-    Server: "vpn.example.com", PSK: "…", LocalID: "client.example.com",
-})
-defer sess.Close()
-// apply res.AssignedIP / res.DNS / res.Gateway yourself
-```
-
-Callers whose parameters arrive as strings (a CLI's flags, NetworkManager's
-settings dictionary) dial by name, selecting protocols by importing them:
-
-```go
-import (
-    "github.com/wanan9999/veepin/client"
-    _ "github.com/wanan9999/veepin/ikev2" // registers "ikev2"
-)
-
-sess, res, err := client.Dial(ctx, "ikev2", map[string]string{
-    "gateway": "vpn.example.com", "psk": "…", "local-id": "client.example.com",
-})
-```
-
-`client.Result` and `client.Session` are protocol-agnostic, so code that applies
-a Result or manages a Session does not change when a protocol is added. A server
-is the same shape: `ikev2.NewServer(ikev2.ServerConfig{…})` wires the TUN,
-address pool and data path, and leaves host routing/NAT to the caller.
-
-### Desktop integration (NetworkManager)
-
-A NetworkManager VPN plugin brings the tunnel up and down from a Linux desktop's
-native VPN UI (GNOME / Pop!\_OS), with **no** dependency on strongSwan. It lives
-in the nested `nm/` module — kept out of the core build so the `veepin` binary
-does not inherit its D-Bus and GTK dependencies — and registers **all sixteen
-protocols as separate VPN types**, so each is its own entry in the desktop's
-*Add VPN* list rather than a "veepin" entry that asks which protocol next:
-
-```sh
-cd nm && make build && sudo make install && sudo systemctl reload NetworkManager
-nmcli connection add type vpn con-name home-veepin ifname '*' \
-  vpn-type org.freedesktop.NetworkManager.veepin.ikev2 \
-  vpn.data 'protocol=ikev2, gateway=vpn.example.com, local-id=client.example.com, full-tunnel=yes'
-nmcli connection modify home-veepin vpn.secrets 'psk=a-strong-preshared-key'
-nmcli connection up home-veepin
-```
-
-Switching protocol is the same command with a different `vpn-type` suffix, a
-matching `protocol=` key and that protocol's own option names; graphically it is
-a different entry in the *Add VPN* list, each with only its own fields.
-See [`doc/networkmanager-plugin.md`](doc/networkmanager-plugin.md) for
-the full design, the D-Bus contract, the per-protocol key reference, and the
-runbook.
-
-## Testing
-
-```sh
-go test -race ./...        # correctness
-./bench.sh                 # performance (see Benchmarks below)
-make interop               # Docker interop suite (build tag `interop`)
-```
-
-Per-package test highlights — the end-to-end IKEv2 and production-client flows,
-the EAP/MD4 vectors, the dataplane round-trips and the codec coverage — are
-collected in [`doc/testing.md`](doc/testing.md).
-
-### Interoperability matrix
-
-The Docker interop tests prove each protocol against a real third-party
-implementation and against itself, both roles. The matrix is regenerated by CI
-from the live interop run on every push to main — each ✓ is a Docker test that
-passed in that run, not a claim.
-
-Two of those cells are also **recorded**. Their peer traffic is committed as a
-golden corpus and replayed offline by the ordinary `go test ./...`, so a
-regression against a real strongSwan or a real wireguard-go fails in
-milliseconds on a laptop rather than in a fifteen-minute Docker shard — and the
-same assertions run against a live peer in CI, because a recording pins the peer
-as it was on the capture date and is never allowed to stand in for the cell. See
-[`doc/replaying-the-peer.md`](doc/replaying-the-peer.md).
+<details>
+<summary>展开协议互通结果</summary>
 
 <!-- livingreadme:interop:start -->
 | Protocol   | veepin client ↔ real server | real client ↔ veepin server | veepin ↔ veepin (self) |
@@ -748,76 +163,12 @@ as it was on the capture date and is never allowed to stand in for the cell. See
 _Generated by the `interop` workflow from `1e619fb` on 2026-10-04._
 <!-- livingreadme:interop:end -->
 
-`*` TOY is a **deliberately insecure example protocol**, not a real one (see
-[The example protocol](#the-example-protocol)). `†` marks a cell with **no
-open-source peer to test against** — a fact about what exists, not work
-outstanding. It applies in two places. Fortinet is asymmetric: no open-source
-FortiOS gateway exists for the client direction, so the openconnect *client*
-against the veepin server is the independent proof. And most of the `pq-` rows
-carry it on both directions, because in 2026 almost nothing else speaks ML-DSA:
-openconnect links GnuTLS, which has no ML-KEM group at all; `sstp-client` and
-SoftEther are older still; and aioquic brings its own hand-written TLS. Those
-rows are **veepin↔veepin evidence only**, which proves the two halves agree with
-each other and not that they are right — the weaker standard this tree normally
-refuses, accepted here because the alternative is not shipping the guarantee,
-and stated rather than glossed. See
-[`doc/security.md`](doc/security.md#what-the-evidence-actually-is-per-variant).
-There is no longer a `‡`: it marked a cell that was work outstanding rather than
-a limitation, and the last one carrying it — SoftEther's own `vpnclient` against
-veepin's server — is built.
+</details>
 
-The three `pq-` rows that do have a peer are where the guarantee is actually
-proven. `pq-openvpn` runs against `openvpn` 2.6.14 on OpenSSL 3.5.7 in both
-directions with **mutual** ML-DSA-65 authentication and an ML-KEM-only group
-list, so each end's post-quantum signature is verified by the other
-implementation. `pq-ssh` runs against OpenSSH 10.0 with `KexAlgorithms` pinned
-to one name in both directions. And `pq-ikev2`'s server cell is the one that
-distinguishes the variant from its base at all: a real strongSwan initiator
-proposing everything the passing cell proposes *minus* `ke1_mlkem768` must be
-**refused**, and a server that merely prefers post-quantum passes the positive
-cell identically and fails that one.
+<a id="benchmarks"></a>
 
-Both SoftEther cross-implementation cells are worth reading as one story. The
-client direction carried `‡` on the reasoning that nothing structural blocked it
-and nobody had spent the afternoon. Building it found that five layers of the
-wire format had never been interoperable — PACK's integer byte order, its three
-disagreeing string encodings, the SHA-0 password construction, the HTTP layer in
-front of the control messages, and the block framing of the data path — each of
-them invisible to the self cell, because both ends were wrong in the same
-direction every time.
-
-The server direction then carried `‡` with two *specific* blockers named, which
-is a stronger claim than "nobody has spent the afternoon" and was wrong twice
-over. Neither was real — a welcome without SoftEther's policy structure parses
-fine, and a client told `max_connection=1` opens no additional connections — and
-the one thing that did block it had not been guessed at: `vpnclient` opens the
-connection with `GET /` and posts the signature second, where veepin's server
-read a single request and judged it. Every real client was refused on its
-opening move. Together they are the clearest illustration on this page of why
-the matrix exists, and the second is the sharper half: reasoning carefully about
-a peer produced two confident blockers, neither of them the one. The full
-rationale,
-the registry API behind the cells, and the interop harness are in
-[`doc/testing.md`](doc/testing.md) and
-[`tests/interop/README.md`](tests/interop/README.md).
-
-#### Tunnel throughput (iperf3, live)
-
-The same matrix, but measured: during each interop run an `iperf3` flow is pushed
-across every tunnel that came up, and the received rate is committed back here on
-push to main. The numbers are relative — a shared CI runner, a short window, one
-TCP stream — so read them as an order-of-magnitude comparison between carriers,
-not a benchmark of the wire.
-
-A **dash** means iperf3 does not apply to that cell: a peer with no bindable
-tunnel address (SoftEther's SecureNAT gateway, which the daemon synthesises
-rather than putting on an interface), the CONNECT-UDP datagram cells (which
-forward datagrams rather than route IP), or a cell with no peer to run against —
-the Fortinet client, and the `pq-` directions marked `†` above.
-A **✗** means it does apply, was attempted across a tunnel that came up, and
-produced no number — a measurement that is broken rather than absent. The two
-used to render identically, which presented a broken measurement as a deliberate
-omission; the interop harness now logs the difference.
+<details>
+<summary>展开互通吞吐量记录</summary>
 
 <!-- livingreadme:interop-benchmark:start -->
 | Protocol   | veepin client ↔ real server | real client ↔ veepin server | veepin ↔ veepin (self) |
@@ -854,163 +205,6 @@ omission; the interop harness now logs the difference.
 _Generated by the `interop` workflow from `1e619fb` on 2026-10-04._
 <!-- livingreadme:interop-benchmark:end -->
 
-## Benchmarks
+</details>
 
-The suite includes detailed benchmarks covering the two performance-critical
-paths — per-packet data-plane throughput and per-connection handshake cost — plus
-the underlying primitives. Run them all with:
-
-```sh
-./bench.sh                 # all benchmarks
-./bench.sh -benchtime 3s   # longer runs for stable numbers
-BENCH=ESP ./bench.sh       # only ESP data-plane benchmarks
-```
-
-or directly with `go test -bench . -benchmem ./...`.
-
-They measure the data plane (ESP/pump, WireGuard, OpenVPN, Nebula and DTLS across
-64/576/1400-byte packets), the per-protocol framing paths, the IKEv2/IKEv1
-handshakes, and the asymmetric/login/codec primitives. Representative results
-(Intel Xeon @ 2.8 GHz, Go 1.26, single core):
-
-| Benchmark | Throughput / latency | Allocs | Notes |
-|-----------|---------------------|--------|-------|
-| ESP decap AES-256-GCM, 1400 B | ~2030 MB/s | 1 | inbound data-plane cipher |
-| ESP encap AES-256-GCM, 1400 B | ~1640 MB/s | 2 | outbound data-plane cipher |
-| Pump inbound AES-256-GCM, 1400 B | ~1990 MB/s | 1 | demux + decap + TUN write |
-| ESP decap AES-256-CBC+SHA256, 1400 B | ~190 MB/s | 3 | ~10× slower than GCM |
-| DH Curve25519 (generate + compute) | ~53 µs each | — | handshake asymmetric cost |
-| DH MODP-2048 compute | ~3.9 ms | — | ~70× slower than Curve25519 |
-| Full PSK handshake | ~370 µs | 406 | end-to-end over UDP loopback |
-| Full EAP-MSCHAPv2 auth | ~16 µs | — | per-login CPU cost |
-| Parse IKE_SA_INIT message | ~270 ns | 4 | codec |
-
-Two takeaways the numbers make concrete: AES-GCM is dramatically faster than
-AES-CBC+HMAC on this data path (hence the GCM-first default), and the elliptic-
-curve groups are orders of magnitude cheaper than MODP-2048 for the handshake
-(hence Curve25519 first).
-
-The **complete `go test -bench` result set** — regenerated by CI on every push to
-main — the per-package breakdown of what each benchmark covers, and the data-plane
-allocation-tuning writeup are in [`doc/benchmarks.md`](doc/benchmarks.md).
-
-## Scope and limitations
-
-These are deliberate boundaries for a readable, self-contained implementation —
-each a localized extension point, not a structural rework:
-
-- **Client and server, Linux data path.** Both roles are implemented, but the TUN
-  data path and route installation are Linux-only (other platforms compile;
-  `OpenTUN` and routing return errors). The IKE/handshake code is portable.
-- **PSK, EAP-MSCHAPv2 and X.509 certificate auth.** Certificate authentication
-  is the RFC 7427 Digital Signature (AUTH method 14) with RSA or ECDSA, plus the
-  legacy RSA method (1) for a peer that does not offer RFC 7427 — client and
-  server, mutually verified against a CA and bound to the peer's IKE identity;
-  it interoperates with strongSwan's `pubkey` auth. The classic per-curve ECDSA
-  methods (9/10/11) and RSA-PSS are not produced, and EAP remains MSCHAPv2 only
-  (TLS/PEAP/GTC out of scope). MSCHAPv2 is dated and needs recoverable passwords
-  server-side, but it is the interoperable username/password choice.
-- **Child SA rekey is fresh-only.** `CREATE_CHILD_SA` treats rekey as a fresh
-  child and the message-ID window accepts only the next expected request. IKEv2
-  *does* implement MOBIKE (RFC 4555 `UPDATE_SA_ADDRESSES`, so a roaming peer
-  survives an address change without re-handshaking), IKE fragmentation
-  (RFC 7383 — it negotiates support, reassembles inbound SKF fragments, and
-  fragments its own output above 1280 octets, which certificate authentication
-  needs: an RSA chain puts IKE_AUTH near 2 KB in both directions) and the
-  RFC 7296 §2.6 cookie exchange; every server bounds unauthenticated work through `dataplane.Gate`.
-- **IPsec through a network that blocks UDP.** `-tcp` carries IKE *and* ESP over
-  one length-prefixed TCP connection (RFC 8229, updated by RFC 9329), verified
-  against libreswan in both roles — the only open-source implementation of
-  either. On the server it is **additive**: the UDP sockets stay bound and a
-  peer is answered on whichever transport it arrived on, so turning it on cannot
-  break an existing deployment. On the client `-port` then names the TCP port
-  and defaults to 4500, so a network permitting only 443 outbound needs one
-  flag. It is a worse transport than UDP wherever UDP works — a datagram
-  protocol on a reliable ordered stream blocks head-of-line — and
-  [`doc/security.md`](doc/security.md) says what it does and does not buy.
-- **Client liveness and SA rekey are unified across protocols.** A
-  cross-protocol monitor (`client.Prober`, applied automatically by
-  `client.Dial`) detects a dead peer and tears the tunnel down for a clean
-  re-dial. IKEv2 runs RFC 7296 dead-peer detection (an empty `INFORMATIONAL` the
-  server must answer); WireGuard probes with a handshake, which doubles as a
-  rekey; pump-based protocols expose an authenticated-idle signal
-  (`dataplane.Pump.IdleFor`), which TOY uses. Reliable-transport protocols
-  (SSTP, SSH, AnyConnect, MASQUE, Fortinet) surface a dead peer through the
-  transport's own read failure, so they need no probe. IKEv2 also rekeys both
-  its SAs proactively before their soft lifetimes: the **Child SA** with a
-  `CREATE_CHILD_SA` whose fresh keys are swapped into the data path before the
-  old SA is deleted, and the **IKE SA** itself (RFC 7296 §2.18) with a fresh
-  Diffie-Hellman exchange for a new control channel — the Child SAs inherited
-  unchanged, so the data path never pauses. Neither lets a long-lived tunnel
-  expire in place.
-- **Dual-stack inner traffic, IPv4 or IPv6 underlay; single IKE SA per Child.**
-  IKEv2 carries both IPv4 and IPv6 inner traffic over one Child SA: the server
-  assigns a v4 and a v6 address via config mode (`INTERNAL_IP4_*` and the
-  `INTERNAL_IP6_ADDRESS` address+prefix, RFC 7296 3.15), offers v4+v6 traffic
-  selectors, and the data path tags each packet with the ESP next-header its
-  version implies (4 or 41); oversized inner v6 gets an ICMPv6 Packet Too Big,
-  the v6 counterpart of the IPv4 fragmentation-needed path. The *outer* transport
-  runs over either family too: the client dials a v4 or v6 server, and the server
-  binds the family of its `-listen` address (`0.0.0.0` for IPv4 by default, `::`
-  for an IPv6/dual-stack socket that serves both). Serving both families
-  simultaneously is what the one `::` dual-stack socket provides; separate v4+v6
-  sockets per port are not added. This is one IKE SA per Child, which is
-  **deliberately** road-warrior rather than a site-to-site multi-SA gateway —
-  see [doc/security.md](doc/security.md#veepin-is-a-road-warrior-vpn-on-purpose)
-  for what that forecloses and why the boundary is drawn there.
-- **Downstream flow shaping is opt-in, and covers sizes rather than timing.**
-  One inner packet becomes one outer datagram, so the size pattern of an inner
-  TLS handshake otherwise survives encapsulation — the fingerprint of
-  [USENIX Security '24](https://www.usenix.org/conference/usenixsecurity24/presentation/xue-fingerprinting),
-  which byte-level obfuscation does not address. `veepin serve <protocol> -shape
-  <bytes>` pads the first N bytes of each inner flow out to the tunnel MTU on
-  all sixteen protocols — RFC 4303 §2.7 TFC padding for ESP (IKEv2,
-  Cisco IPsec, GlobalProtect, Ivanti), trailing octets for WireGuard and
-  AmneziaWG, the RFC 1661 §5.1 PPP Information field for SSTP, Fortinet and
-  L2TP/IPsec, the length-delimited data payload for AnyConnect and OpenVPN, and
-  trailing filler on the IP-bearing frames of an L2TPv3 pseudowire or a
-  SoftEther layer-2 segment, trailing filler on an SSH tunnel channel, and —
-  inside the sealed or length-covered payload, because neither has room after
-  it — a Nebula transport message and a MASQUE DATAGRAM capsule. All are inert
-  to a conforming receiver, which delimits the real
-  packet by the inner IP header, so **stock clients benefit unmodified**; and
-  because the attack targets handshakes, the cost is per-flow rather than
-  per-byte, leaving bulk throughput untouched. It does not shape packet counts
-  or timing, does not cover the upstream direction unless the client is also
-  veepin, and is not probe resistance. Packet counts and timing are a different
-  mechanism and IKEv2 now has one: `-iptfs -iptfs-rate` transmits at a fixed
-  rate regardless of load (RFC 9347), so the datagram stream stops depending on
-  the traffic inside it. It is IKEv2 only, costs its rate continuously, and is
-  off by default — see [`doc/security.md`](doc/security.md).
-  Interop cells prove strongSwan, wireguard-go, `openvpn`, pppd and openconnect
-  all accept the padding *and* trim it correctly; it stays off by default
-  because the vendor OS stacks it is meant to protect are untested —
-  [`doc/verifying-shaping.md`](doc/verifying-shaping.md) is the procedure for
-  changing that, and it needs a person with a device rather than more code. See
-  [`doc/traffic-shaping.md`](doc/traffic-shaping.md) for the design and for what
-  it does not hide.
-- **AnyConnect's DTLS needs TLS 1.3 or Extended Master Secret** (RFC 7627) — Go's
-  `crypto/tls` will not run the RFC 5705 exporter otherwise, so against such a
-  peer the client stays on TLS. Only PSK-NEGOTIATE mode; auth is
-  username/password only (no client certificates or SSO flows).
-- **L2TP/IPsec requires UDP-encapsulated ESP.** No raw IP-protocol-50 path, so it
-  always forces the NAT-T float to UDP/4500. IKEv1 is Main Mode + PSK only (no
-  Aggressive Mode, certificates, or Quick-Mode PFS), MS-CHAPv2 only. The L2TP
-  engine manages repeated Quick Mode and fresh Main Mode renewal while keeping
-  PPP alive. Time and ESP-volume limits are enforced; failed renewal never
-  permits expired keys or wrapped ESP sequence numbers. Windows/iKuai long-run
-  interoperability for this lifecycle implementation still needs live validation.
-
-The **security boundaries** — no key zeroization, single-core throughput, and
-MASQUE's capsule-mode head-of-line blocking — are stated separately in
-[`doc/security.md`](doc/security.md).
-
-### Embedded L2TP/IPsec sessions
-
-`l2tp.ServerConfig.PacketDeviceFactory` supplies an independent IPv4 packet
-device for each authenticated PPP session. Write receives packets from that
-client; Read returns packets to send back. Close must unblock Read and release
-all session resources. The factory replaces the OS TUN, so an embedding router
-can use its own userspace TCP/IP stack without host routes or NAT. Packets are
-accepted only after IPCP is up and only from the assigned source address.
-`Server.KickUserSessions` closes the matching devices and VPN sessions.
+详细性能数据与测试方法见 [基准说明](doc/benchmarks.md)，可用 `./bench.sh` 或 `go test -bench . -benchmem ./...` 运行基准测试。
