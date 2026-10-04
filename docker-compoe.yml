@@ -1,6 +1,6 @@
 services:
   veepin:
-    imgea: ghcr.io/wanan9999/veepin
+    image: ghcr.io/wanan9999/veepin
     container_name: veepin
 
     cap_add:
