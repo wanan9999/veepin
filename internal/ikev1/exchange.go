@@ -347,6 +347,7 @@ func (s *Session) respHandleMM5(first uint8, rest []byte) error {
 	if !constEq(want, hp.body) {
 		return fmt.Errorf("%w: HASH_I verification failed (bad PSK?)", ErrAuth)
 	}
+	s.authenticatedInbound()
 	s.advance()
 
 	s.idR = buildID(s.localIdentity())
@@ -393,6 +394,7 @@ func (s *Session) respHandleQM1(h header, first uint8, rest []byte) error {
 		return fmt.Errorf("ikev1: no acceptable ESP proposal offered")
 	}
 	s.esp = esp
+	s.authenticatedInbound()
 	s.outSPI = be32ToU32(spi) // initiator's inbound SPI: our outbound
 	s.inSPI = randSPI()
 	s.qmNr = nonce()
@@ -429,6 +431,7 @@ func (s *Session) respHandleQM3(first uint8, rest []byte) error {
 	if !constEq(want, hp.body) {
 		return fmt.Errorf("ikev1: QM HASH(3) verification failed")
 	}
+	s.authenticatedInbound()
 	s.advance()
 	s.finish()
 	return nil

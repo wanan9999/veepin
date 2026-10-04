@@ -2,11 +2,13 @@ package l2tp
 
 import (
 	"bytes"
+	"encoding/binary"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/xen0bit/veepin/dataplane"
+	"github.com/xen0bit/veepin/internal/ikev2/esp"
 )
 
 // Connected UDP clients reject replies from the wrong source port, just as
@@ -82,4 +84,63 @@ func TestIKERepliesFollowObservedTransport(t *testing.T) {
 		p.noteIKEAddr(nattAddr, true)
 		expect(t, p, false, nattClient, true) // MM2, before the engine negotiates NAT-T.
 	})
+}
+
+func TestUnverifiedIKECannotMoveExistingPeer(t *testing.T) {
+	original := &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1), Port: 40000}
+	forged := &net.UDPAddr{IP: net.IPv4(192, 0, 2, 99), Port: 41000}
+	srv := &Server{cfg: ServerConfig{PublicIP: net.IPv4(192, 0, 2, 2)},
+		gate: dataplane.NewGate(dataplane.AdmissionConfig{}), byCookie: make(map[[8]byte]*serverPeer)}
+	cookie := [8]byte{1, 2, 3, 4, 5, 6, 7, 8}
+	p := srv.peerFor(cookie, original, false)
+	if p == nil {
+		t.Fatal("test peer admission failed")
+	}
+	// Syntactically valid but unauthenticated Informational packet carrying
+	// the existing cookie; it must not commit a NAT-T float or address change.
+	pkt := make([]byte, 28)
+	copy(pkt, cookie[:])
+	pkt[17], pkt[18] = 0x10, 5
+	binary.BigEndian.PutUint32(pkt[24:], uint32(len(pkt)))
+	srv.dispatchIKE(pkt, forged, true)
+	if p.ikeNATT || p.addr != original || !p.nattAddr.IP.Equal(original.IP) {
+		t.Fatal("unverified IKE changed the peer's transport or address")
+	}
+	p.noteIKEAddr(original, true) // model a successful authenticated float.
+	srv.dispatchIKE(pkt, forged, false)
+	if !p.ikeNATT || p.addr != original || p.nattAddr != original {
+		t.Fatal("old UDP/500 traffic changed the floated endpoint")
+	}
+}
+
+// Knowing the public ESP SPI does not authenticate a NAT rebinding. Only a
+// fresh integrity-checked packet can change where subsequent traffic goes.
+func TestESPRebindingRequiresIntegrityAndFreshSequence(t *testing.T) {
+	original := &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1), Port: 40000}
+	rebound := &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1), Port: 41000}
+	forged := &net.UDPAddr{IP: net.IPv4(192, 0, 2, 99), Port: 42000}
+	tr := esp.Transform{EncrID: 12, EncrKeyLn: 128, IntegID: 2,
+		EncKey: bytes.Repeat([]byte{0x11}, 16), IntegKey: bytes.Repeat([]byte{0x22}, 20)}
+	sender := &esp.SA{SPIOut: 0x12345678, Out: tr, In: tr}
+	receiver := &esp.SA{SPIIn: 0x12345678, Out: tr, In: tr}
+	p := &serverPeer{srv: &Server{}, nattAddr: original, sa: receiver,
+		tunnel: NewTunnel(RoleLNS, func([]byte) error { return nil }, newEndpoint(RoleLNS))}
+	packet, err := sender.Encapsulate(wrapUDP([]byte{0}), ipProtoUDP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := append([]byte(nil), packet...)
+	tampered[len(tampered)-1] ^= 1
+	p.handleESP(tampered, forged)
+	if p.nattAddr != original {
+		t.Fatal("forged ESP moved the endpoint")
+	}
+	p.handleESP(packet, rebound)
+	if p.nattAddr != rebound {
+		t.Fatal("authenticated ESP did not move the endpoint")
+	}
+	p.handleESP(packet, forged)
+	if p.nattAddr != rebound {
+		t.Fatal("replayed ESP moved the endpoint")
+	}
 }

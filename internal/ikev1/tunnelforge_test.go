@@ -101,12 +101,21 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 	t.Helper()
 	result := newCapture()
 	out := make(chan []byte, 16)
+	authenticated := 0
+	sentAfterAuthentication := 0
 	s := NewSession(Config{
 		Role: Responder, PSK: []byte("synthetic-interop-secret"),
 		LocalIP: net.IPv4(192, 0, 2, 1), PeerIP: net.IPv4(192, 0, 2, 2),
 		LocalPort: 500, PeerPort: 40000,
-		Send: func(b []byte, _ bool) error { out <- b; return nil }, Handler: result,
+		Send: func(b []byte, _ bool) error {
+			sentAfterAuthentication = authenticated
+			out <- b
+			return nil
+		}, Handler: result,
 	})
+	process := func(b []byte) {
+		s.HandleInboundAuthenticated(b, func() { authenticated++ })
+	}
 	t.Cleanup(func() { s.mu.Lock(); defer s.mu.Unlock(); s.advance() })
 	h := header{initCookie: [8]byte{1, 2, 3, 4, 5, 6, 7, 8}, exchange: exchangeMain}
 	var lastReply []byte
@@ -147,8 +156,15 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 		return p.body
 	}
 	sa := wireHex(t, tunnelForgeIKE)
-	s.HandleInbound(marshalMessage(h, append([]payload{{typ: payloadSA, body: sa}}, natTVendorPayloads()...)))
+	mm1 := marshalMessage(h, append([]payload{{typ: payloadSA, body: sa}}, natTVendorPayloads()...))
+	process(mm1)
 	hr, _, _ := receive()
+	mm2Reply := append([]byte(nil), lastReply...)
+	process(mm1)
+	receive()
+	if !bytes.Equal(mm2Reply, lastReply) {
+		t.Fatal("MM1 retry did not replay MM2")
+	}
 	h.respCookie = hr.respCookie
 	dh, err := dhGroup(groupMODP2048)
 	if err != nil {
@@ -159,9 +175,19 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 		t.Fatal(err)
 	}
 	ni := bytes.Repeat([]byte{0x31}, 32)
-	s.HandleInbound(marshalMessage(h, []payload{{typ: payloadKE, body: pub}, {typ: payloadNonce, body: ni}}))
+	mm3 := marshalMessage(h, []payload{{typ: payloadKE, body: pub}, {typ: payloadNonce, body: ni}})
+	process(mm3)
 	_, first, rest := receive()
 	mm4 := decode(first, rest)
+	mm4Reply := append([]byte(nil), lastReply...)
+	process(mm3)
+	receive()
+	if !bytes.Equal(mm4Reply, lastReply) {
+		t.Fatal("MM3 retry did not replay MM4")
+	}
+	if authenticated != 0 {
+		t.Fatal("unauthenticated Main Mode changed the endpoint")
+	}
 	peerPub := body(mm4, payloadKE)
 	shared, err := dh.ComputeSecret(peerPub)
 	if err != nil {
@@ -193,7 +219,20 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 		}
 		*iv = lastBlock(ct)
 		packet := assemble(h, first, ct)
-		s.HandleInbound(packet)
+		if h.exchange == exchangeMain {
+			// Neither a mismatched responder cookie nor stripped encryption
+			// flag can authorize a mapping update, even with valid ciphertext.
+			badCookie := append([]byte(nil), packet...)
+			badCookie[8] ^= 1
+			process(badCookie)
+			plainFlag := append([]byte(nil), packet...)
+			plainFlag[19] &^= flagEncryption
+			process(plainFlag)
+			if authenticated != 0 {
+				t.Fatal("invalid header authorized endpoint change")
+			}
+		}
+		process(packet)
 		return packet
 	}
 	decrypt := func(iv *[]byte) ([]payload, []byte, int) {
@@ -214,6 +253,9 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 	h.flags = flagEncryption
 	mm5 := sendEncrypted(&keys.iv, []payload{{typ: payloadID, body: id}, {typ: payloadHash, body: keys.hashI(pub, peerPub, h.initCookie, h.respCookie, sa, id)}})
 	if wrongPSK {
+		if authenticated != 0 {
+			t.Fatal("wrong PSK authorized endpoint change")
+		}
 		// A wrong PSK also changes the CBC key, so rejection may happen while
 		// parsing the decrypted payload, before HASH_I can be checked.
 		select {
@@ -229,19 +271,25 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 		return
 	}
 	mm6, _, _ := decrypt(&keys.iv)
+	if authenticated != 1 || sentAfterAuthentication != 1 {
+		t.Fatal("MM6 was sent before its authenticated endpoint was committed")
+	}
 	// Model a lost MM6. An exact MM5 retry must return the same ciphertext,
 	// preserving the CBC IV and retry budget while already waiting for QM1.
 	cachedMM6 := append([]byte(nil), lastReply...)
 	cachedIV := append([]byte(nil), s.keys.iv...)
 	retries := s.retries
-	s.HandleInbound(mm5)
+	process(mm5)
 	receive()
 	if !bytes.Equal(lastReply, cachedMM6) || !bytes.Equal(s.keys.iv, cachedIV) || s.retries != retries {
 		t.Fatal("MM5 retransmission changed the response, CBC IV or retry budget")
 	}
+	if authenticated != 1 {
+		t.Fatal("cached MM5 changed the endpoint again")
+	}
 	modified := append([]byte(nil), mm5...)
 	modified[len(modified)-1] ^= 1
-	s.HandleInbound(modified)
+	process(modified)
 	select {
 	case <-out:
 		t.Fatal("modified MM5 replayed a cached response")
@@ -260,6 +308,9 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 	hash1 := prf.Apply(keys.skeyidA, concat(be32(h.messageID), chain))
 	sendEncrypted(&iv, append([]payload{{typ: payloadHash, body: hash1}}, content...))
 	qm2, plain, consumed := decrypt(&iv)
+	if authenticated != 2 || sentAfterAuthentication != 2 {
+		t.Fatal("QM2 was sent before its authenticated endpoint was committed")
+	}
 	if !bytes.Equal(body(qm2, payloadHash), prf.Apply(keys.skeyidA, concat(be32(h.messageID), qmNi, afterHash(plain, qm2, consumed)))) {
 		t.Fatal("responder HASH(2) did not authenticate")
 	}
@@ -278,6 +329,9 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 	hash3 := prf.Apply(keys.skeyidA, concat([]byte{0}, be32(h.messageID), qmNi, qmNr))
 	sendEncrypted(&iv, []payload{{typ: payloadHash, body: hash3}})
 	r := waitResult(t, "AES-128 responder", result)
+	if authenticated != 3 {
+		t.Fatal("QM3 did not authenticate before establishment")
+	}
 	if r.EncrKeyLn != 128 || r.IntegID != espAuthHMACSHA196 || !r.NATT {
 		t.Fatalf("unexpected result: %+v", r)
 	}

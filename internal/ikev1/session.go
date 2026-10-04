@@ -260,11 +260,12 @@ type Session struct {
 	// Retransmission of the last message we sent. lastSentNATT preserves the
 	// engine's transport hint (MM4 precedes the float). The L2TP responder's
 	// socket adapter additionally waits for the peer's observed NAT-T endpoint.
-	lastSent     []byte
-	lastSentNATT bool
-	lastReceived []byte // exact accepted request that produced lastSent
-	timer        *time.Timer
-	retries      int
+	lastSent        []byte
+	lastSentNATT    bool
+	lastReceived    []byte // exact accepted request that produced lastSent
+	onAuthenticated func() // scoped to the current inbound datagram, under mu
+	timer           *time.Timer
+	retries         int
 }
 
 // InitiatorCookie extracts the initiator cookie that opens every ISAKMP header.
@@ -311,14 +312,48 @@ func (s *Session) Start() {
 
 // HandleInbound processes one inbound IKE datagram.
 func (s *Session) HandleInbound(pkt []byte) {
+	s.HandleInboundAuthenticated(pkt, nil)
+}
+
+// HandleInboundAuthenticated reports verified Main/Quick Mode responder
+// packets and established Informational packets before sending a response.
+// Other profiles use HandleInbound. A transport can commit a NAT mapping here;
+// receiving a packet with known cookies alone is not evidence of its origin.
+// The callback runs under the session lock and must not re-enter Session.
+// Cached duplicates do not call it: they must not move an established mapping.
+func (s *Session) HandleInboundAuthenticated(pkt []byte, authenticated func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.onAuthenticated = authenticated
+	defer func() { s.onAuthenticated = nil }()
 	if s.state == stFailed {
 		return
 	}
 	h, first, rest, err := parseHeader(pkt)
 	if err != nil {
 		return
+	}
+	// Match exact retransmissions before checking the current state's cookie
+	// and encryption requirements: MM1 has a zero responder cookie, and MM3
+	// is plaintext even while we are now awaiting encrypted MM5. Replaying a
+	// cached reply never authorizes an endpoint change or resets the deadline.
+	if len(s.lastSent) != 0 && bytes.Equal(pkt, s.lastReceived) {
+		_ = s.cfg.Send(s.lastSent, s.lastSentNATT)
+		return
+	}
+	if s.state != stInit {
+		if h.initCookie != s.initCookie {
+			return
+		}
+		if s.state != stWaitMM2 && s.state != stWaitAM2 && h.respCookie != s.respCookie {
+			return
+		}
+	}
+	switch s.state {
+	case stWaitMM5, stWaitMM6, stWaitQM1, stWaitQM2, stWaitQM3, stDone:
+		if h.flags&flagEncryption == 0 {
+			return
+		}
 	}
 	// An established session still has one live exchange: the Informational one
 	// carrying dead-peer detection. Everything else after phase 2 is ignored.
@@ -330,19 +365,17 @@ func (s *Session) HandleInbound(pkt []byte) {
 		}
 		return
 	}
-	// A lost reply makes the peer retransmit its previous request, even though
-	// we already advanced (e.g. MM5 while waiting for QM1). Replay the cached
-	// ciphertext without decrypting again or advancing the CBC IV. Do not reset
-	// the retry budget: duplicate traffic must not keep a half-open SA forever.
-	if len(s.lastSent) != 0 && bytes.Equal(pkt, s.lastReceived) {
-		_ = s.cfg.Send(s.lastSent, s.lastSentNATT)
-		return
-	}
 	previousState := s.state
 	if err := s.dispatch(h, first, rest); err != nil {
 		s.failLocked(err)
 	} else if s.state != previousState && len(s.lastSent) != 0 {
 		s.lastReceived = append(s.lastReceived[:0], pkt...)
+	}
+}
+
+func (s *Session) authenticatedInbound() {
+	if s.onAuthenticated != nil {
+		s.onAuthenticated()
 	}
 }
 

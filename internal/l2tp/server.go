@@ -165,8 +165,7 @@ func (s *Server) recvNATT() {
 				continue
 			}
 			if p := s.peerBySPI(pkt); p != nil {
-				p.noteAddr(addr)
-				p.handleESP(pkt)
+				p.handleESP(pkt, addr)
 			}
 		}
 		if err != nil {
@@ -182,13 +181,18 @@ func (s *Server) dispatchIKE(msg []byte, addr *net.UDPAddr, natt bool) {
 	if !ok {
 		return
 	}
-	p := s.peerFor(cookie, addr)
+	p := s.peerFor(cookie, addr, natt)
 	if p == nil {
 		// Refused by admission control; already logged.
 		return
 	}
-	p.noteIKEAddr(addr, natt)
-	p.ike.HandleInbound(msg)
+	p.mu.Lock()
+	oldTransport := p.ikeNATT && !natt
+	p.mu.Unlock()
+	if oldTransport {
+		return // RFC 3947 section 4: do not revive the pre-float exchange.
+	}
+	p.ike.HandleInboundAuthenticated(msg, func() { p.noteIKEAddr(addr, natt) })
 }
 
 // peerFor returns the peer owning an initiator cookie, creating an IKE responder
@@ -197,7 +201,7 @@ func (s *Server) dispatchIKE(msg []byte, addr *net.UDPAddr, natt bool) {
 // This is where an unauthenticated peer makes the server allocate: the cookie is
 // chosen by the initiator, so without a bound, traffic with a varying cookie
 // creates one IKE responder -- with its Diffie-Hellman state -- per message.
-func (s *Server) peerFor(cookie [8]byte, addr *net.UDPAddr) *serverPeer {
+func (s *Server) peerFor(cookie [8]byte, addr *net.UDPAddr, natt bool) *serverPeer {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if p, ok := s.byCookie[cookie]; ok {
@@ -213,9 +217,10 @@ func (s *Server) peerFor(cookie [8]byte, addr *net.UDPAddr) *serverPeer {
 		srv:    s,
 		cookie: cookie,
 		addr:   addr,
-		// Until the client's floated source port is observed, assume it binds the
-		// NAT-T port itself, which an un-NATed peer does.
-		nattAddr: &net.UDPAddr{IP: addr.IP, Port: nattPort},
+		// Pin unauthenticated replies to this initial endpoint. No guessed
+		// destination port is used while waiting for an authenticated float.
+		nattAddr: addr,
+		ikeNATT:  natt,
 	}
 	p.ike = ikev1.NewSession(ikev1.Config{
 		Role:      ikev1.Responder,
@@ -362,28 +367,43 @@ type serverPeer struct {
 	innerIP  net.IP
 }
 
-// noteIKEAddr records where a peer's IKE now comes from. After the float that is
-// a new source port, and a NAT rebinding can change it again, so replies follow
-// the address the last message actually arrived from.
+// noteIKEAddr commits a cryptographically verified IKE packet's endpoint.
+// Initial unauthenticated replies use the endpoint fixed at peer creation.
 func (p *serverPeer) noteIKEAddr(addr *net.UDPAddr, natt bool) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	if p.ikeNATT && !natt {
+		p.mu.Unlock()
+		return
+	}
+	previous := p.addr
+	if p.ikeNATT {
+		previous = p.nattAddr
+	}
+	changed := previous.Port != addr.Port || !previous.IP.Equal(addr.IP) || natt != p.ikeNATT
 	if natt {
 		p.nattAddr = addr
 		p.ikeNATT = true
 	} else {
 		p.addr = addr
 	}
+	p.mu.Unlock()
+	if changed {
+		p.srv.logger.Printf("l2tp: authenticated IKE endpoint %s -> %s (NAT-T=%v)", previous, addr, natt)
+	}
 }
 
-// noteAddr tracks the source of inbound ESP, so outbound ESP follows a peer
-// whose NAT binding moves.
+// noteAddr commits the source of ESP only after integrity and replay checks.
 func (p *serverPeer) noteAddr(addr *net.UDPAddr) {
 	p.mu.Lock()
-	if p.nattAddr.Port != addr.Port || !p.nattAddr.IP.Equal(addr.IP) {
+	previous := p.nattAddr
+	changed := previous.Port != addr.Port || !previous.IP.Equal(addr.IP)
+	if changed {
 		p.nattAddr = addr
 	}
 	p.mu.Unlock()
+	if changed {
+		p.srv.logger.Printf("l2tp: authenticated ESP endpoint %s -> %s", previous, addr)
+	}
 }
 
 func (p *serverPeer) sendIKE(msg []byte, _ bool) error {
@@ -403,7 +423,7 @@ func (p *serverPeer) sendIKE(msg []byte, _ bool) error {
 	return err
 }
 
-func (p *serverPeer) handleESP(pkt []byte) {
+func (p *serverPeer) handleESP(pkt []byte, addr *net.UDPAddr) {
 	p.mu.Lock()
 	sa, tun := p.sa, p.tunnel
 	p.mu.Unlock()
@@ -415,6 +435,7 @@ func (p *serverPeer) handleESP(pkt []byte) {
 		return
 	}
 	if l2, ok := unwrapUDP(inner); ok {
+		p.noteAddr(addr)
 		tun.HandleInbound(l2)
 	}
 }

@@ -127,6 +127,7 @@ func (s *Session) handleDPD(h header, first uint8, rest []byte) error {
 	if !constEq(want, hp.body) {
 		return errors.New("informational HASH verification failed")
 	}
+	s.authenticatedInbound()
 	np, ok := findPayload(payloads, payloadNotify)
 	if !ok {
 		return nil // a delete or some other notification-free message; nothing to do

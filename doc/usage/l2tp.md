@@ -45,10 +45,17 @@ additional CLI flag is needed. AES-256 suites remain accepted and the veepin
 client's default offers remain unchanged. 3DES is not enabled.
 
 TunnelForge v0.7.4 completes Main Mode on UDP/500 and moves to UDP/4500 for
-Quick Mode. The server follows the observed IKE transport rather than sending
+Quick Mode. This is a compatibility exception: RFC 3947 section 4 requires a
+NAT-detecting initiator to float when sending MM5, not after MM6. Standard
+clients retain that path. The server follows the authenticated IKE transport rather than sending
 MM6 to a guessed client port 4500 as soon as NAT-T is negotiated. Clients that
 float before MM5 or start on UDP/4500 remain supported. Exact retransmissions
 receive the cached reply without advancing CBC state or resetting the timeout.
+The initial endpoint is fixed at peer creation. Existing mappings change only
+after IKE authentication, or after ESP integrity and anti-replay validation;
+cookies, plaintext packets and cached IKE retries do not authorize rebinding.
+After a verified float, old UDP/500 traffic is discarded. This fixes endpoint
+tracking, not all authentication, rekey or lifecycle limitations of the stack.
 `ignoring exchange type 2 while awaiting 32` alongside an MM6 timeout is a reason
 to check this transport transition, not to change the PSK or expose UDP/1701.
 
@@ -61,6 +68,7 @@ separate strongSwan/xl2tpd cell restricts both phases to AES-128/SHA-1:
 ```sh
 go test ./internal/ikev1 -run 'TestTunnelForge|TestAES128' -count=1 -v
 go test ./internal/l2tp -run '^TestIKERepliesFollowObservedTransport$' -count=1 -v
+go test ./internal/l2tp -run 'TestUnverifiedIKE|TestESPRebinding' -count=1 -v
 cd tests/interop
 docker compose -f compose.l2tp-server-aes128.yml down -v --remove-orphans
 go test -tags interop -run '^TestInteropL2TPClientVeepinServerAES128$' -count=1 -v -timeout 15m .

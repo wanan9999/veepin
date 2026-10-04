@@ -61,6 +61,12 @@ sequenceDiagram
   advances (MM5 while awaiting Quick Mode is the important case). Neither the
   CBC IV nor the retry budget changes. L2TP sends responses on the client's
   observed IKE transport, including clients that float only after MM6.
+- **Endpoint changes require authentication.** The L2TP socket adapter commits
+  the peer's address inside the Main/Quick Mode responder's authentication
+  callback, before the reply is sent; established Informational packets also
+  verify their HASH first. Cached retransmissions cannot authorize rebinding.
+  TunnelForge's late float is an explicit compatibility exception to RFC 3947
+  section 4, not the standard Main Mode sequence.
 - **Initiators offer AES-CBC-256 with SHA-256 or SHA-1 and MODP-2048.** L2TP
   responders additionally accept AES-CBC-128 in both IKE and ESP for peers such
   as TunnelForge v0.7.4. The same negotiated length drives key derivation and
