@@ -1,9 +1,54 @@
 package ikev1
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 )
+
+// Attribute order and integer encoding may differ, values and presence may
+// not (RFC 2409 section 5 and Appendix A). Lifetime unit/duration pairing is
+// separately validated by proposalLifetimes before this comparison.
+func matchesOfferedTransform(selected parsedTransform, offer []byte) bool {
+	proto, _, transforms, err := parseSA(offer)
+	if err != nil {
+		return false
+	}
+	typeID, durationID := uint16(attrLifeType), uint16(attrLifeDuration)
+	if proto == protoESP {
+		typeID, durationID = ipsecAttrLifeType, ipsecAttrLifeDuration
+	}
+	seconds, kilobytes, valid := proposalLifetimes(selected.attrs, typeID, durationID)
+	if !valid {
+		return false
+	}
+	for _, t := range transforms {
+		if selected.proposal != t.proposal || selected.num != t.num || selected.id != t.id || len(selected.attrs) != len(t.attrs) {
+			continue
+		}
+		// Comparing attributes as a set must not permit swapping durations
+		// between seconds and kilobytes.
+		offerSeconds, offerKilobytes, ok := proposalLifetimes(t.attrs, typeID, durationID)
+		if !ok || seconds != offerSeconds || kilobytes != offerKilobytes {
+			continue
+		}
+		used := make([]bool, len(t.attrs))
+		for _, a := range selected.attrs {
+			found := false
+			for i, b := range t.attrs {
+				if !used[i] && a.typ == b.typ && bytes.Equal(bytes.TrimLeft(a.value, "\x00"), bytes.TrimLeft(b.value, "\x00")) {
+					used[i], found = true, true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
 
 // ikeProposal is a phase-1 (IKE SA) cipher suite. veepin pins a small set — the
 // initiator offers them in preference order and the responder selects the first
@@ -93,12 +138,12 @@ func buildPhase1SA(proposals []ikeProposal) []byte {
 	return append(saPrefix(), prop...)
 }
 
-// buildPhase1SAChosen renders an SA body carrying the single transform the
-// responder selected, echoing its transform number.
-func buildPhase1SAChosen(num uint8, p ikeProposal) []byte {
-	t := buildTransform(payloadNone, num, transformKeyIKE, p.attrs())
-	prop := buildProposal(payloadNone, 1, protoISAKMP, nil, 1, t)
-	return append(saPrefix(), prop...)
+// buildSelectedSA preserves the selected offer's attributes, including absent
+// optional attributes and lifetime encodings (RFC 2409 section 5). Local
+// lifetime limits are enforced by the timers, never by rewriting this offer.
+func buildSelectedSA(proto uint8, spi []byte, selected parsedTransform) []byte {
+	tr := buildTransform(payloadNone, selected.num, selected.id, encodeAttrs(selected.attrs))
+	return append(saPrefix(), buildProposal(payloadNone, selected.proposal, proto, spi, 1, tr)...)
 }
 
 // saPrefix is the DOI + Situation that opens every IPsec-DOI SA payload body.
@@ -112,9 +157,10 @@ func saPrefix() []byte {
 // parsedTransform is one transform decoded from an SA payload: its number and
 // attributes.
 type parsedTransform struct {
-	num   uint8
-	id    uint8
-	attrs []attr
+	proposal uint8
+	num      uint8
+	id       uint8
+	attrs    []attr
 }
 
 // parseSA decodes an SA payload body into its protocol ID, SPI, and the list of
@@ -124,7 +170,9 @@ func parseSA(body []byte) (proto uint8, spi []byte, transforms []parsedTransform
 	if len(body) < 8 {
 		return 0, nil, nil, fmt.Errorf("ikev1: SA body too short")
 	}
-	// Skip DOI + Situation.
+	if binary.BigEndian.Uint32(body[:4]) != doiIPsec || binary.BigEndian.Uint32(body[4:8]) != situationIdentityOnly {
+		return 0, nil, nil, fmt.Errorf("ikev1: unsupported DOI or situation")
+	}
 	chain := body[8:]
 	if len(chain) < 4 {
 		return 0, nil, nil, fmt.Errorf("ikev1: SA without a proposal")
@@ -138,15 +186,24 @@ func parseSA(body []byte) (proto uint8, spi []byte, transforms []parsedTransform
 		return 0, nil, nil, fmt.Errorf("ikev1: truncated proposal")
 	}
 	proto = prop[1]
+	// This implementation negotiates one protocol proposal with alternative
+	// transforms, never a multi-protocol bundle. Reject rather than ignore it.
+	if propLen != len(chain) || chain[0] != payloadNone || prop[0] == 0 {
+		return 0, nil, nil, fmt.Errorf("ikev1: unsupported proposal chain")
+	}
 	spiSize := int(prop[2])
 	ntrans := int(prop[3])
+	if ntrans == 0 {
+		return 0, nil, nil, fmt.Errorf("ikev1: empty proposal")
+	}
 	if len(prop) < 4+spiSize {
 		return 0, nil, nil, fmt.Errorf("ikev1: proposal SPI overruns")
 	}
 	spi = append([]byte(nil), prop[4:4+spiSize]...)
 	tchain := prop[4+spiSize:]
 
-	for range ntrans {
+	var lastNumber uint8
+	for i := range ntrans {
 		if len(tchain) < 4 {
 			return 0, nil, nil, fmt.Errorf("ikev1: truncated transform header")
 		}
@@ -155,12 +212,19 @@ func parseSA(body []byte) (proto uint8, spi []byte, transforms []parsedTransform
 			return 0, nil, nil, fmt.Errorf("ikev1: transform length out of range")
 		}
 		tbody := tchain[4:tlen]
+		if tbody[0] <= lastNumber || (i == ntrans-1 && tchain[0] != payloadNone) || (i < ntrans-1 && tchain[0] != payloadTransform) {
+			return 0, nil, nil, fmt.Errorf("ikev1: invalid transform chain")
+		}
+		lastNumber = tbody[0]
 		attrs, aerr := parseAttrs(tbody[4:])
 		if aerr != nil {
 			return 0, nil, nil, aerr
 		}
-		transforms = append(transforms, parsedTransform{num: tbody[0], id: tbody[1], attrs: attrs})
+		transforms = append(transforms, parsedTransform{proposal: prop[0], num: tbody[0], id: tbody[1], attrs: attrs})
 		tchain = tchain[tlen:]
+	}
+	if len(tchain) != 0 {
+		return 0, nil, nil, fmt.Errorf("ikev1: trailing transform data")
 	}
 	return proto, spi, transforms, nil
 }

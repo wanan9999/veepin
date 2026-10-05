@@ -90,7 +90,7 @@ func (s *Session) finish() {
 	}
 	r := Result{
 		PeerID:    append([]byte(nil), peerID...),
-		Lifetime:  time.Duration(s.esp.lifeSeconds) * time.Second,
+		Lifetime:  time.Duration(min(s.esp.lifeSeconds, lifetimeSeconds(s.cfg.ESPLifetime))) * time.Second,
 		ByteLimit: uint64(s.esp.lifeKilobytes) * 1024,
 		Rekey:     s.quickParent != nil,
 		EncrID:    encrID, EncrKeyLn: keyLn, IntegID: integID,
@@ -151,6 +151,9 @@ func basicAttrOf(attrs []attr, typ uint16) (uint16, bool) {
 }
 
 func ikePropFromAttrs(attrs []attr) (ikeProposal, bool) {
+	if !supportedProposalAttrs(attrs, attrLifeType, attrLifeDuration, attrEncryption, attrHash, attrGroup, attrAuthMethod, attrKeyLength) {
+		return ikeProposal{}, false
+	}
 	enc, ok1 := basicAttrOf(attrs, attrEncryption)
 	hsh, ok2 := basicAttrOf(attrs, attrHash)
 	grp, ok3 := basicAttrOf(attrs, attrGroup)
@@ -189,17 +192,20 @@ func (s *Session) supportedAESKeyBits(bits uint16) bool {
 	return bits == 256 || (bits == 128 && (s.cfg.Role == Responder || s.quickParent != nil || s.renewalRoot != nil) && s.cfg.Phase2 == Phase2L2TP)
 }
 
-func (s *Session) selectIKEProposal(transforms []parsedTransform) (ikeProposal, uint8, bool) {
+func (s *Session) selectIKEProposal(transforms []parsedTransform) (ikeProposal, parsedTransform, bool) {
 	for _, t := range transforms {
-		if p, ok := ikePropFromAttrs(t.attrs); ok && s.supportedIKE(p) {
-			p.lifeSeconds = min(p.lifeSeconds, lifetimeSeconds(s.cfg.IKELifetime))
-			return p, t.num, true
+		if p, ok := ikePropFromAttrs(t.attrs); ok && t.id == transformKeyIKE && s.supportedIKE(p) {
+			return p, t, true
 		}
 	}
-	return ikeProposal{}, 0, false
+	return ikeProposal{}, parsedTransform{}, false
 }
 
 func espPropFromAttrs(transformID uint8, attrs []attr) (espProposal, bool) {
+	// Unsupported attributes (including PFS) must not be silently negotiated.
+	if !supportedProposalAttrs(attrs, ipsecAttrLifeType, ipsecAttrLifeDuration, ipsecAttrAuthAlg, ipsecAttrEncapMode, ipsecAttrKeyLength) {
+		return espProposal{}, false
+	}
 	auth, ok := basicAttrOf(attrs, ipsecAttrAuthAlg)
 	if !ok {
 		return espProposal{}, false
@@ -210,11 +216,25 @@ func espPropFromAttrs(transformID uint8, attrs []attr) (espProposal, bool) {
 	if !ok {
 		return espProposal{}, false
 	}
-	// PFS needs a KE payload and a separate DH secret; do not accept it silently.
-	if _, present := findAttr(attrs, 3); present {
-		return espProposal{}, false
-	}
 	return espProposal{transformID: transformID, keyBits: kb, authAlg: auth, encap: encap, lifeSeconds: life, lifeKilobytes: kbLife}, true
+}
+
+func supportedProposalAttrs(attrs []attr, lifeType, lifeDuration uint16, supported ...uint16) bool {
+	seen := make(map[uint16]bool)
+	for _, a := range attrs {
+		if a.typ == lifeType || a.typ == lifeDuration {
+			continue // unit/duration pairs are checked by proposalLifetimes
+		}
+		allowed := false
+		for _, typ := range supported {
+			allowed = allowed || a.typ == typ
+		}
+		if !allowed || seen[a.typ] || !a.basic {
+			return false
+		}
+		seen[a.typ] = true
+	}
+	return true
 }
 
 // supportedESP reports whether a phase-2 proposal matches the profile. The
@@ -232,14 +252,13 @@ func (s *Session) supportedESP(p espProposal) bool {
 		(p.authAlg == authHMACSHA2256 || p.authAlg == authHMACSHA) && okEncap
 }
 
-func (s *Session) selectESPProposal(transforms []parsedTransform) (espProposal, uint8, bool) {
+func (s *Session) selectESPProposal(transforms []parsedTransform) (espProposal, parsedTransform, bool) {
 	for _, t := range transforms {
 		if p, ok := espPropFromAttrs(t.id, t.attrs); ok && s.supportedESP(p) {
-			p.lifeSeconds = min(p.lifeSeconds, lifetimeSeconds(s.cfg.ESPLifetime))
-			return p, t.num, true
+			return p, t, true
 		}
 	}
-	return espProposal{}, 0, false
+	return espProposal{}, parsedTransform{}, false
 }
 
 // phase2Selectors are the traffic selectors Quick Mode names, local first.

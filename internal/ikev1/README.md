@@ -83,7 +83,13 @@ are not reused within the control SA. State is bounded to 32 cached exchanges,
 1024 used message IDs and 8 overlapping control SAs.
 
 The local time ceiling defaults to 3600 seconds for both phases. A shorter peer
-lifetime wins. ESP renews at 80% (initiator) or 90% (responder); IKE starts fresh
+lifetime wins locally. Main/Aggressive/Quick Mode responses preserve the selected
+offer's attributes, including omitted and volume lifetimes (RFC 2409 section 5).
+The local timer limit is not written back into the response. Initiators reject
+modified attributes; unknown or duplicate attributes are not silently accepted.
+SA parsing supports a single protocol proposal with alternative transforms;
+multi-proposal bundles are explicitly rejected rather than partially accepted.
+ESP renews at 80% (initiator) or 90% (responder); IKE starts fresh
 Main Mode at 75%. IKE renewal uses UDP/4500 and new cookies/DH/nonces, checks the
 same authenticated identity, and keeps the existing PPP session. Multiple control SAs can coexist after crossed renewal; the two peers need
 not prefer the same one. Older control SAs still accept authenticated Quick Mode

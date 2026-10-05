@@ -71,6 +71,9 @@ func (s *Session) authMethod() uint16 {
 // the group of the offered proposals, all of which use the same one.
 func (s *Session) sendAM1() error {
 	props := defaultIKEProposals(s.authMethod())
+	for n := range props {
+		props[n].lifeSeconds = lifetimeSeconds(s.cfg.IKELifetime)
+	}
 	s.prop = props[0] // provisional: only the hash can differ, and AM2 pins it
 	dh, err := dhGroup(s.prop.group)
 	if err != nil {
@@ -103,15 +106,18 @@ func (s *Session) initHandleAM2(h header, first uint8, rest []byte) error {
 	if !ok {
 		return fmt.Errorf("ikev1: AM2 without SA")
 	}
-	_, _, transforms, err := parseSA(sa.body)
+	proto, spi, transforms, err := parseSA(sa.body)
 	if err != nil {
 		return err
+	}
+	if proto != protoISAKMP || len(spi) != 0 {
+		return fmt.Errorf("ikev1: phase-1 SA malformed")
 	}
 	if len(transforms) != 1 {
 		return fmt.Errorf("ikev1: AM2 must choose exactly one transform")
 	}
 	prop, ok := ikePropFromAttrs(transforms[0].attrs)
-	if !ok || !s.supportedIKE(prop) {
+	if !ok || !s.supportedIKE(prop) || !matchesOfferedTransform(transforms[0], s.saBodyI) {
 		return fmt.Errorf("ikev1: responder chose an unsupported IKE proposal")
 	}
 	if prop.group != s.prop.group {
@@ -179,15 +185,18 @@ func (s *Session) respHandleAM1(h header, first uint8, rest []byte) error {
 		return fmt.Errorf("ikev1: AM1 missing SA, KE, Nonce or ID")
 	}
 	s.saBodyI = append([]byte(nil), sa.body...)
-	_, _, transforms, err := parseSA(sa.body)
+	proto, spi, transforms, err := parseSA(sa.body)
 	if err != nil {
 		return err
+	}
+	if proto != protoISAKMP || len(spi) != 0 {
+		return fmt.Errorf("ikev1: phase-1 SA malformed")
 	}
 	prop, num, ok := s.selectIKEProposal(transforms)
 	if !ok {
 		return fmt.Errorf("ikev1: no acceptable IKE proposal offered")
 	}
-	s.prop, s.propNum = prop, num
+	s.prop = prop
 	s.peerNATT = peerSupportsNATT(payloads)
 	if !s.peerNATT {
 		return errNoNATT
@@ -225,7 +234,7 @@ func (s *Session) respHandleAM1(h header, first uint8, rest []byte) error {
 	s.advance()
 
 	am2 := []payload{
-		{typ: payloadSA, body: buildPhase1SAChosen(num, prop)},
+		{typ: payloadSA, body: buildSelectedSA(protoISAKMP, nil, num)},
 		{typ: payloadKE, body: s.localPub},
 		{typ: payloadNonce, body: s.nr},
 		{typ: payloadID, body: s.idR},
@@ -266,7 +275,7 @@ func (s *Session) respHandleAM3(first uint8, rest []byte) error {
 // goes straight to Quick Mode, which is what Main Mode has always done.
 func (s *Session) afterPhase1() error {
 	if s.cfg.ManageLifetime {
-		d := time.Duration(s.prop.lifeSeconds) * time.Second
+		d := time.Duration(min(s.prop.lifeSeconds, lifetimeSeconds(s.cfg.IKELifetime))) * time.Second
 		s.ikeDeadline = time.Now().Add(d)
 		s.renewAt = time.Now().Add(d * 3 / 4)
 	}

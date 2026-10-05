@@ -34,8 +34,8 @@ func TestTunnelForgeProposalsSelectAES128Without3DES(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, num, ok := s.selectIKEProposal(transforms)
-	if !ok || num != 1 || p.keyBits != 128 || p.hash != hashSHA || p.group != groupMODP2048 {
-		t.Fatalf("TunnelForge IKE offer rejected or misselected: %+v, number=%d, ok=%v", p, num, ok)
+	if !ok || num.num != 1 || p.keyBits != 128 || p.hash != hashSHA || p.group != groupMODP2048 {
+		t.Fatalf("TunnelForge IKE offer rejected or misselected: %+v, number=%d, ok=%v", p, num.num, ok)
 	}
 	if _, _, ok := s.selectIKEProposal(transforms[1:]); ok {
 		t.Fatal("3DES-only IKE offer accepted")
@@ -45,8 +45,8 @@ func TestTunnelForgeProposalsSelectAES128Without3DES(t *testing.T) {
 		t.Fatal(err)
 	}
 	e, num, ok := s.selectESPProposal(transforms)
-	if !ok || num != 1 || e.keyBits != 128 || e.authAlg != authHMACSHA || e.encap != encapUDPTransport {
-		t.Fatalf("TunnelForge ESP offer rejected or misselected: %+v, number=%d, ok=%v", e, num, ok)
+	if !ok || num.num != 1 || e.keyBits != 128 || e.authAlg != authHMACSHA || e.encap != encapUDPTransport {
+		t.Fatalf("TunnelForge ESP offer rejected or misselected: %+v, number=%d, ok=%v", e, num.num, ok)
 	}
 	if _, _, ok := s.selectESPProposal(transforms[1:]); ok {
 		t.Fatal("3DES-only ESP offer accepted")

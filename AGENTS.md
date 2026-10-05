@@ -232,6 +232,13 @@ Three rules the suite is built on, each of which it broke once:
 
 ## Protocol work: things learned the hard way
 
+- IKEv1 responses preserve the selected proposal attributes (RFC 2409 section 5).
+  Keep peer offer values separate from local IKE/ESP lifetime ceilings; enforce
+  the latter through renewal/expiry timers, never by rewriting MM2/AM2/QM2.
+  Cover unequal lifetimes with strict initiator validation, omitted/volume
+  attributes and a synthetic Windows-style offer. Plaintext pre-key errors are
+  logged as unauthenticated; they cannot terminate an established session.
+
 - **Read the reference implementation's source, not a summary of it.** For
   Pulse, the cipher identifiers in my own plan were wrong (`AES-128-CBC` is 2 and
   `AES-256-CBC` is 5), and the configuration packet turned out to have four

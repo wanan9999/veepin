@@ -218,7 +218,6 @@ const (
 // datagrams go out through cfg.Send and come in via HandleInbound.
 type Session struct {
 	dataDeadline      atomic.Int64 // owner-wide current ESP deadline, independent of control SA
-	offeredIKE        []ikeProposal
 	offeredESP        []espProposal
 	dataRekeyPending  atomic.Bool
 	usedQuickIDs      map[uint32]struct{}
@@ -252,7 +251,6 @@ type Session struct {
 	respCookie [8]byte
 
 	prop              ikeProposal
-	propNum           uint8
 	dh                cryptoutil.DHGroup
 	localPub, peerPub []byte
 	ni, nr            []byte // initiator, responder phase-1 nonces
@@ -432,6 +430,18 @@ func (s *Session) authenticatedInbound() {
 }
 
 func (s *Session) dispatch(h header, first uint8, rest []byte) error {
+	// A pre-key Informational may explain a rejected MM2 (RFC 2408 section
+	// 3.14), but is unauthenticated. Log it without allowing it to terminate
+	// the exchange or alter retry/endpoint state. Established SAs still require
+	// the authenticated Informational path above.
+	if h.exchange == exchangeInformational && s.keys == nil && h.flags&flagEncryption == 0 {
+		if payloads, _, err := parsePayloads(first, rest); err == nil {
+			if _, err = s.handleNotifies(payloads); err != nil {
+				s.logger.Warnf("ikev1: unauthenticated informational: %v", err)
+			}
+		}
+		return nil
+	}
 	// Route on the exchange type, not just on what the state machine expects
 	// next. A peer may interleave an Informational exchange (a notify such as
 	// INITIAL_CONTACT, or a delete) at any point; feeding one to the Main Mode

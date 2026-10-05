@@ -23,7 +23,6 @@ func (s *Session) sendMM1() error {
 	for n := range props {
 		props[n].lifeSeconds = lifetimeSeconds(s.cfg.IKELifetime)
 	}
-	s.offeredIKE = props
 	s.saBodyI = buildPhase1SA(props)
 	// The SA payload is what HASH_I/HASH_R authenticate; the Vendor IDs that
 	// follow it announce NAT-T support and are outside that hash.
@@ -60,18 +59,20 @@ func (s *Session) initHandleMM2(h header, first uint8, rest []byte) error {
 	if !ok {
 		return fmt.Errorf("ikev1: MM2 without SA")
 	}
-	_, _, transforms, err := parseSA(sa.body)
+	proto, spi, transforms, err := parseSA(sa.body)
 	if err != nil {
 		return err
+	}
+	if proto != protoISAKMP || len(spi) != 0 {
+		return fmt.Errorf("ikev1: phase-1 SA malformed")
 	}
 	if len(transforms) != 1 {
 		return fmt.Errorf("ikev1: MM2 must choose exactly one transform")
 	}
 	prop, ok := ikePropFromAttrs(transforms[0].attrs)
-	if !ok || !s.supportedIKE(prop) || !s.wasOfferedIKE(prop) {
+	if !ok || !s.supportedIKE(prop) || !matchesOfferedTransform(transforms[0], s.saBodyI) {
 		return fmt.Errorf("ikev1: responder chose an unsupported IKE proposal")
 	}
-	prop.lifeSeconds = min(prop.lifeSeconds, lifetimeSeconds(s.cfg.IKELifetime))
 	s.prop = prop
 	s.peerNATT = peerSupportsNATT(payloads)
 	if !s.peerNATT {
@@ -220,10 +221,9 @@ func (s *Session) initHandleQM2(first uint8, rest []byte) error {
 		return fmt.Errorf("ikev1: QM2 SA malformed")
 	}
 	esp, ok := espPropFromAttrs(transforms[0].id, transforms[0].attrs)
-	if !ok || !s.supportedESP(esp) || !s.wasOfferedESP(esp) {
+	if !ok || !s.supportedESP(esp) || !matchesOfferedTransform(transforms[0], buildPhase2SA(0, s.offeredESP)) {
 		return fmt.Errorf("ikev1: responder chose an unsupported ESP proposal")
 	}
-	esp.lifeSeconds = min(esp.lifeSeconds, lifetimeSeconds(s.cfg.ESPLifetime))
 	s.esp = esp
 	s.outSPI = be32ToU32(spi)
 
@@ -274,23 +274,24 @@ func (s *Session) respHandleMM1(h header, first uint8, rest []byte) error {
 		return fmt.Errorf("ikev1: MM1 without SA")
 	}
 	s.saBodyI = append([]byte(nil), sa.body...) // initiator's SA body, for HASH
-	_, _, transforms, err := parseSA(sa.body)
+	proto, spi, transforms, err := parseSA(sa.body)
 	if err != nil {
 		return err
+	}
+	if proto != protoISAKMP || len(spi) != 0 {
+		return fmt.Errorf("ikev1: phase-1 SA malformed")
 	}
 	prop, num, ok := s.selectIKEProposal(transforms)
 	if !ok {
 		return fmt.Errorf("ikev1: no acceptable IKE proposal offered")
 	}
-	prop.lifeSeconds = min(prop.lifeSeconds, lifetimeSeconds(s.cfg.IKELifetime))
 	s.prop = prop
-	s.propNum = num
 	s.peerNATT = peerSupportsNATT(payloads)
 	if !s.peerNATT {
 		return errNoNATT
 	}
 
-	chosen := buildPhase1SAChosen(num, prop)
+	chosen := buildSelectedSA(protoISAKMP, nil, num)
 	mm2 := []payload{{typ: payloadSA, body: chosen}}
 	if s.peerNATT {
 		// Echo NAT-T support only if the initiator offered it, so a peer that
@@ -413,7 +414,6 @@ func (s *Session) respHandleQM1(h header, first uint8, rest []byte) error {
 	if !ok {
 		return fmt.Errorf("ikev1: no acceptable ESP proposal offered")
 	}
-	esp.lifeSeconds = min(esp.lifeSeconds, lifetimeSeconds(s.cfg.ESPLifetime))
 	s.esp = esp
 	s.authenticatedInbound()
 	s.outSPI = be32ToU32(spi) // initiator's inbound SPI: our outbound
@@ -423,7 +423,7 @@ func (s *Session) respHandleQM1(h header, first uint8, rest []byte) error {
 
 	// QM2: HASH(2), SA (our inbound SPI, the chosen transform), Nr, IDci, IDcr.
 	content := []payload{
-		{typ: payloadSA, body: buildSelectedPhase2SA(s.inSPI, esp, num)},
+		{typ: payloadSA, body: buildSelectedSA(protoESP, be32(s.inSPI), num)},
 		{typ: payloadNonce, body: s.qmNr},
 	}
 	// Echo the two traffic-selector IDs if present.
@@ -456,28 +456,4 @@ func (s *Session) respHandleQM3(first uint8, rest []byte) error {
 	s.advance()
 	s.finish()
 	return nil
-}
-
-// Preserve the offered transform number: strict initiators use it to identify
-// the selection rather than treating the responder's SA as a fresh proposal.
-func buildSelectedPhase2SA(spi uint32, p espProposal, num uint8) []byte {
-	tr := buildTransform(payloadNone, num, p.transformID, p.attrs())
-	return append(saPrefix(), buildProposal(payloadNone, 1, protoESP, be32(spi), 1, tr)...)
-}
-
-func (s *Session) wasOfferedIKE(p ikeProposal) bool {
-	for _, offered := range s.offeredIKE {
-		if offered.encr == p.encr && offered.keyBits == p.keyBits && offered.hash == p.hash && offered.group == p.group && offered.auth == p.auth {
-			return true
-		}
-	}
-	return false
-}
-func (s *Session) wasOfferedESP(p espProposal) bool {
-	for _, offered := range s.offeredESP {
-		if offered.transformID == p.transformID && offered.keyBits == p.keyBits && offered.authAlg == p.authAlg && offered.encap == p.encap {
-			return true
-		}
-	}
-	return false
 }

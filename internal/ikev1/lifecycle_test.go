@@ -219,7 +219,7 @@ func TestCrossedIKERenewalsAllowIndependentControlSelection(t *testing.T) {
 }
 
 func TestSelectedTransformNumberIsPreserved(t *testing.T) {
-	_, _, ts, err := parseSA(buildSelectedPhase2SA(42, espProposal{transformID: espTransformAES, keyBits: 128, authAlg: authHMACSHA, encap: encapUDPTransport, lifeSeconds: 3600}, 7))
+	_, _, ts, err := parseSA(buildSelectedSA(protoESP, be32(42), parsedTransform{proposal: 1, num: 7, id: espTransformAES, attrs: []attr{basicAttr(ipsecAttrEncapMode, encapUDPTransport)}}))
 	if err != nil || len(ts) != 1 || ts[0].num != 7 {
 		t.Fatalf("transform selection lost: %+v, %v", ts, err)
 	}

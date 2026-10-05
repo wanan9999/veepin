@@ -13,8 +13,9 @@ import (
 // notify reads as a malformed Main Mode message and the session fails with a
 // misleading parse error instead of the reason the peer actually gave.
 //
-// Types below 16384 are errors and end the exchange; the rest are status and are
-// informational only (DPD keepalives and INITIAL_CONTACT arrive this way).
+// Types below 16384 are errors; the caller decides whether the message is
+// authenticated enough to end an exchange. Pre-key Informational errors are
+// diagnostic only. The remaining types are status notifications.
 
 const notifyStatusBase = 16384
 
@@ -22,22 +23,24 @@ const notifyStatusBase = 16384
 // the common misconfigurations report themselves in words.
 var notifyNames = map[uint16]string{
 	1:  "INVALID-PAYLOAD-TYPE",
-	7:  "INVALID-FLAGS",
-	8:  "INVALID-MESSAGE-ID",
+	7:  "INVALID-EXCHANGE-TYPE",
+	8:  "INVALID-FLAGS",
+	9:  "INVALID-MESSAGE-ID",
+	13: "ATTRIBUTES-NOT-SUPPORTED",
 	14: "NO-PROPOSAL-CHOSEN",
 	17: "INVALID-KEY-INFORMATION",
 	18: "INVALID-ID-INFORMATION",
-	20: "AUTHENTICATION-FAILED",
+	20: "INVALID-CERTIFICATE",
 	23: "INVALID-HASH-INFORMATION",
 	24: "AUTHENTICATION-FAILED",
-	29: "ATTRIBUTES-NOT-SUPPORTED",
-	30: "NO-PROPOSAL-CHOSEN",
+	29: "UNSUPPORTED-EXCHANGE-TYPE",
+	30: "UNEQUAL-PAYLOAD-LENGTHS",
 }
 
 // notifyType extracts the message type from a Notification payload body.
 func notifyType(body []byte) (uint16, bool) {
 	// DOI (4) | Protocol-ID (1) | SPI Size (1) | Notify Message Type (2).
-	if len(body) < 8 {
+	if len(body) < 8 || len(body) < 8+int(body[5]) {
 		return 0, false
 	}
 	return binary.BigEndian.Uint16(body[6:8]), true
