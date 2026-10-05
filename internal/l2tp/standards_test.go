@@ -6,6 +6,7 @@ import (
 	"github.com/wanan9999/veepin/internal/ikev1"
 	"github.com/wanan9999/veepin/internal/ppp"
 	"net"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -16,10 +17,10 @@ type auditHandler struct{ data, up, closed int }
 func (h *auditHandler) DataFrame([]byte) { h.data++ }
 func (h *auditHandler) SessionUp()       { h.up++ }
 func (h *auditHandler) Closed(error)     { h.closed++ }
-func auditTunnel(t *testing.T) (*Tunnel, *auditHandler, *[][]byte) {
+func auditTunnel(t *testing.T) (*Tunnel, *auditHandler, *packetCapture) {
 	h := &auditHandler{}
-	sent := new([][]byte)
-	tun := NewTunnel(RoleLNS, func(b []byte) error { *sent = append(*sent, b); return nil }, h)
+	sent := &packetCapture{}
+	tun := NewTunnel(RoleLNS, func(b []byte) error { sent.add(b); return nil }, h)
 	t.Cleanup(tun.Abort)
 	return tun, h, sent
 }
@@ -42,7 +43,7 @@ func TestSmallMRUFragmentsIPv4AndReportsDF(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovered := make([]byte, 1380)
-	for _, frame := range *sent {
+	for _, frame := range sent.snapshot() {
 		h, err := parseHeader(frame)
 		if err != nil {
 			t.Fatal(err)
@@ -59,14 +60,14 @@ func TestSmallMRUFragmentsIPv4AndReportsDF(t *testing.T) {
 			t.Fatal("fragmented payload changed")
 		}
 	}
-	*sent = nil
+	sent.clear()
 	packet[6] = 0x40
 	var feedback []byte
 	if err := sendIPv4(tun, packet, 576, 0, func(b []byte) { feedback = b }); err != nil {
 		t.Fatal(err)
 	}
 	mtu, ok := dataplane.ParseFragNeeded(feedback)
-	if len(*sent) != 0 || !ok || mtu != 576 {
+	if len(sent.snapshot()) != 0 || !ok || mtu != 576 {
 		t.Fatal("DF packet did not receive correct PMTU feedback")
 	}
 }
@@ -81,10 +82,10 @@ func TestClosedTunnelAcknowledgesRepeatedStopWithoutDeliveringData(t *testing.T)
 	b.addUint16(avpAssignedTunnelID, 7)
 	pkt := marshalControl(tun.localTunnelID, 0, 0, 0, b.bytes())
 	tun.HandleInbound(pkt)
-	first := len(*sent)
+	first := len(sent.snapshot())
 	tun.HandleInbound(pkt)
 	tun.HandleInbound(marshalData(tun.localTunnelID, tun.localSessionID, []byte{1}))
-	if len(*sent) != first+1 || h.closed != 1 || h.data != 0 {
+	if len(sent.snapshot()) != first+1 || h.closed != 1 || h.data != 0 {
 		t.Fatal("close tombstone did not ACK exactly once without reopening data")
 	}
 }
@@ -95,17 +96,17 @@ func TestAdministrativeCloseRetransmitsUntilAcknowledged(t *testing.T) {
 		tun.state = stateEstablished
 		tun.peerTunnelID.Store(7)
 		tun.Close()
-		first := len(*sent)
+		first := len(sent.snapshot())
 		time.Sleep(time.Second)
 		synctest.Wait()
-		if len(*sent) != first+1 {
+		if len(sent.snapshot()) != first+1 {
 			t.Fatal("lost StopCCN was not retransmitted")
 		}
 		tun.HandleInbound(marshalControl(tun.localTunnelID, 0, 0, 1, nil))
-		first = len(*sent)
+		first = len(sent.snapshot())
 		time.Sleep(3 * time.Second)
 		synctest.Wait()
-		if len(*sent) != first {
+		if len(sent.snapshot()) != first {
 			t.Fatal("acknowledged StopCCN still retransmitted")
 		}
 	})
@@ -118,15 +119,15 @@ func TestControlWindowNeverSendsAnUnacknowledgedSecondMessage(t *testing.T) {
 	b.addUint16(avpMessageType, msgHELLO)
 	tun.queueControl(0, b.bytes())
 	tun.queueControl(0, b.bytes())
-	if len(*sent) != 1 {
+	if len(sent.snapshot()) != 1 {
 		t.Fatal("exceeded the conservative receive window")
 	}
 	tun.HandleInbound(marshalControl(tun.localTunnelID, 0, 0, 2, nil))
-	if len(*sent) != 1 {
+	if len(sent.snapshot()) != 1 {
 		t.Fatal("accepted acknowledgement for unsent sequence")
 	}
 	tun.HandleInbound(marshalControl(tun.localTunnelID, 0, 0, 1, nil))
-	if len(*sent) != 2 {
+	if len(sent.snapshot()) != 2 {
 		t.Fatal("did not release next queued message")
 	}
 }
@@ -196,7 +197,7 @@ func TestStandardsSequencingRequiredMustBeHonored(t *testing.T) {
 	b.add(39, nil)
 	tun.HandleInbound(marshalControl(tun.localTunnelID, tun.localSessionID, 0, 0, b.bytes()))
 	_ = tun.SendPPP([]byte{1})
-	h, _ := parseHeader((*sent)[len(*sent)-1])
+	h, _ := parseHeader(sent.snapshot()[len(sent.snapshot())-1])
 	if !h.hasSeq {
 		t.Fatal("accepted Sequencing Required then emitted unsequenced data")
 	}
@@ -207,7 +208,7 @@ func TestStandardsCloseMustNotify(t *testing.T) {
 	tun.peerTunnelID.Store(7)
 	tun.peerSessionID.Store(9)
 	tun.Close()
-	if len(*sent) == 0 {
+	if len(sent.snapshot()) == 0 {
 		t.Fatal("administrative close sent no CDN/StopCCN")
 	}
 }
@@ -227,7 +228,24 @@ func TestStandardsStopCCNMustBeAcknowledged(t *testing.T) {
 	b.addUint16(1, 1)
 	b.addUint16(avpAssignedTunnelID, 7)
 	tun.HandleInbound(marshalControl(tun.localTunnelID, 0, 0, 0, b.bytes()))
-	if len(*sent) == 0 {
+	if len(sent.snapshot()) == 0 {
 		t.Fatal("StopCCN closed immediately without ZLB acknowledgement")
 	}
 }
+
+type packetCapture struct {
+	mu     sync.Mutex
+	frames [][]byte
+}
+
+func (c *packetCapture) add(b []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.frames = append(c.frames, append([]byte(nil), b...))
+}
+func (c *packetCapture) snapshot() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([][]byte(nil), c.frames...)
+}
+func (c *packetCapture) clear() { c.mu.Lock(); defer c.mu.Unlock(); c.frames = nil }

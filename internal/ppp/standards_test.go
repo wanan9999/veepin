@@ -3,16 +3,29 @@ package ppp
 import (
 	"bytes"
 	"net"
+	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 )
 
-func auditServer(t *testing.T) (*ServerSession, *serverRecordHandler, *[][]byte) {
+func TestFailureContainsACompleteMSCHAPChallenge(t *testing.T) {
+	s, _, _ := auditServer(t)
+	for i := range s.authChallenge {
+		s.authChallenge[i] = byte(i)
+	}
+	failure := string(buildFailure(s.authChallenge))
+	if !strings.Contains(failure, "C=000102030405060708090A0B0C0D0E0F ") {
+		t.Fatal("MS-CHAPv2 Failure challenge is incomplete")
+	}
+}
+
+func auditServer(t *testing.T) (*ServerSession, *serverRecordHandler, *packetCapture) {
 	t.Helper()
 	h := &serverRecordHandler{}
-	sent := new([][]byte)
-	s := NewServer(ServerConfig{ClientIP: net.IPv4(10, 0, 0, 2), ServerIP: net.IPv4(10, 0, 0, 1), Auth: func(string) (string, bool) { return "test-only", true }}, transportFunc(func(b []byte) error { *sent = append(*sent, b); return nil }), h)
+	sent := &packetCapture{}
+	s := NewServer(ServerConfig{ClientIP: net.IPv4(10, 0, 0, 2), ServerIP: net.IPv4(10, 0, 0, 1), Auth: func(string) (string, bool) { return "test-only", true }}, transportFunc(func(b []byte) error { sent.add(b); return nil }), h)
 	t.Cleanup(s.Close)
 	return s, h, sent
 }
@@ -20,12 +33,14 @@ func auditServer(t *testing.T) (*ServerSession, *serverRecordHandler, *[][]byte)
 func TestChallengeRetransmissionReusesIdentifierAndChallenge(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s, _, sent := auditServer(t)
+		s.mu.Lock()
 		s.phase = phaseAuth
 		s.sendChallenge()
-		first := bytes.Clone((*sent)[0])
+		s.mu.Unlock()
+		first := bytes.Clone(sent.snapshot()[0])
 		time.Sleep(restartInterval)
 		synctest.Wait()
-		if len(*sent) != 2 || !bytes.Equal(first, (*sent)[1]) {
+		if len(sent.snapshot()) != 2 || !bytes.Equal(first, sent.snapshot()[1]) {
 			t.Fatal("challenge retransmission changed or disappeared")
 		}
 		s.Close()
@@ -75,7 +90,7 @@ func TestDuplicateAuthenticationCannotChangeAccount(t *testing.T) {
 func TestUnsupportedQualityIsRejectedAndMRUIsRetained(t *testing.T) {
 	s, _, sent := auditServer(t)
 	s.Receive(encodeFrame(ProtocolLCP, cpPacket{Code: codeConfigureRequest, ID: 9, Body: marshalOptions([]option{{Type: optQuality, Value: []byte{0xc0, 0x25, 0, 0, 0, 1}}})}.marshal()))
-	_, body, _ := decodeFrame((*sent)[0])
+	_, body, _ := decodeFrame(sent.snapshot()[0])
 	pkt, _ := parseCP(body)
 	if pkt.Code != codeConfigureReject {
 		t.Fatal("accepted unimplemented quality protocol")
@@ -97,7 +112,7 @@ func TestStandardsUnknownIPCPMustReject(t *testing.T) {
 	s, _, sent := auditServer(t)
 	s.phase = phaseIPCP
 	s.Receive(encodeFrame(ProtocolIPCP, cpPacket{Code: codeConfigureRequest, ID: 7, Body: marshalOptions([]option{{Type: 250, Value: []byte{1}}})}.marshal()))
-	_, payload, _ := decodeFrame((*sent)[0])
+	_, payload, _ := decodeFrame(sent.snapshot()[0])
 	p, _ := parseCP(payload)
 	if p.Code != codeConfigureReject {
 		t.Fatalf("unknown IPCP option response code=%d, want Reject", p.Code)
@@ -140,4 +155,20 @@ func TestStandardsRepeatedCHAPMustNotRestartIPCP(t *testing.T) {
 	if s.phase != phaseUp {
 		t.Fatal("duplicate CHAP response restarted IPCP instead of cached Success")
 	}
+}
+
+type packetCapture struct {
+	mu     sync.Mutex
+	frames [][]byte
+}
+
+func (c *packetCapture) add(b []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.frames = append(c.frames, append([]byte(nil), b...))
+}
+func (c *packetCapture) snapshot() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([][]byte(nil), c.frames...)
 }

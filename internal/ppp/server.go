@@ -431,7 +431,7 @@ func (s *ServerSession) handleCHAP(payload []byte) {
 	}
 	password, known := s.cfg.Auth(username)
 	if !known || !verifyResponse(s.authChallenge, peerCh, username, password, ntResp) {
-		s.send(ProtocolCHAP, cpPacket{Code: chapFailure, ID: pkt.ID, Body: buildFailure()}.marshal())
+		s.send(ProtocolCHAP, cpPacket{Code: chapFailure, ID: pkt.ID, Body: buildFailure(s.authChallenge)}.marshal())
 		s.failLocked(fmt.Errorf("ppp: authentication failed for %q", username))
 		return
 	}

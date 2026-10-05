@@ -6,6 +6,23 @@ import (
 	"testing"
 )
 
+func TestExchangeHeaderCannotRelabelAnOutstandingQuickMode(t *testing.T) {
+	s := NewSession(Config{Role: Initiator, Send: func([]byte, bool) error { return nil }, Handler: newCapture()})
+	defer s.Close()
+	s.state = stWaitQM2
+	s.qmMsgID = 7
+	h := s.mmHeader(exchangeQuick, flagEncryption, 8)
+	s.HandleInbound(assemble(h, payloadHash, make([]byte, 16)))
+	if s.state != stWaitQM2 {
+		t.Fatal("mismatched message ID affected outstanding exchange")
+	}
+	s.state = stWaitMM2
+	s.HandleInbound(assemble(s.mmHeader(exchangeMain, 0, 8), payloadNone, nil))
+	if s.state != stWaitMM2 {
+		t.Fatal("nonzero phase-1 message ID was dispatched")
+	}
+}
+
 func TestTransportSelectorsPreserveEphemeralPortAndRejectOtherServices(t *testing.T) {
 	s := &Session{cfg: Config{Role: Responder, Phase2: Phase2L2TP, LocalIP: net.IPv4(192, 0, 2, 1), PeerIP: net.IPv4(198, 51, 100, 2)}}
 	peer := buildID(l2tpSelector(net.IPv4(10, 0, 0, 2)))

@@ -378,6 +378,18 @@ func (s *Session) HandleInboundAuthenticated(pkt []byte, authenticated func()) {
 	if err != nil {
 		return
 	}
+	// Phase 1 has message ID zero; each post-phase-1 exchange owns a nonzero
+	// ID. Checking the header as well as HASH prevents a relabelled ciphertext
+	// from being accepted under another exchange's IV and authentication state.
+	if (h.exchange == exchangeMain || h.exchange == exchangeAggressive) && h.messageID != 0 {
+		return
+	}
+	if (h.exchange == exchangeQuick || h.exchange == exchangeTransaction) && h.messageID == 0 {
+		return
+	}
+	if (s.state == stWaitQM2 || s.state == stWaitQM3) && h.exchange == exchangeQuick && h.messageID != s.qmMsgID {
+		return
+	}
 	if s.cfg.ManageLifetime && s.established && !time.Now().Before(s.ikeDeadline) {
 		return
 	}

@@ -124,8 +124,8 @@ func buildSuccess(authChallenge, peerChallenge [mschap.ChallengeLen]byte, userna
 
 // buildFailure builds an MS-CHAPv2 Failure body for a rejected authentication.
 // E=691 is ERROR_AUTHENTICATION_FAILURE.
-func buildFailure() []byte {
-	return []byte("E=691 R=0 C=00000000000000000000000000000000 V=3 M=Access denied")
+func buildFailure(challenge [mschap.ChallengeLen]byte) []byte {
+	return fmt.Appendf(nil, "E=691 R=0 C=%X V=3 M=Access denied", challenge)
 }
 
 // failureMessage extracts a human-readable reason from an MS-CHAPv2 Failure
