@@ -32,21 +32,8 @@ var errNoNATT = errors.New("ikev1: peer does not support NAT-T (RFC 3947), which
 // the protocol expresses that. Real detection still runs, and is logged, so a
 // genuine NAT is visible in the logs rather than masked.
 
-// natTVendorIDs are the well-known Vendor ID payloads (MD5 hashes of the spec
-// names) advertising NAT-T support. We send the RFC 3947 ID and recognize the
-// widely deployed drafts, since peers key their payload numbering off whichever
-// they see.
-var natTVendorIDs = struct {
-	rfc3947  []byte
-	draft02n []byte
-	draft02  []byte
-	draft03  []byte
-}{
-	rfc3947:  mustHex("4a131c81070358455c5728f20e95452f"), // "RFC 3947"
-	draft02n: mustHex("90cb80913ebb696e086381b5ec427b1f"), // "draft-ietf-ipsec-nat-t-ike-02\n"
-	draft02:  mustHex("cd60464335df21f87cfdb2fc68b6a448"), // "draft-ietf-ipsec-nat-t-ike-02"
-	draft03:  mustHex("7d9419a65310ca6f2c179d9215529d56"), // "draft-ietf-ipsec-nat-t-ike-03"
-}
+// Only RFC 3947 is negotiated; obsolete drafts use incompatible payload IDs.
+var natTVendorIDs = struct{ rfc3947 []byte }{mustHex("4a131c81070358455c5728f20e95452f")}
 
 func mustHex(s string) []byte {
 	b, err := hex.DecodeString(s)
@@ -56,31 +43,14 @@ func mustHex(s string) []byte {
 	return b
 }
 
-// natTVendorPayloads are the Vendor ID payloads we offer in MM1 (and echo in
-// MM2). Offering the drafts as well as the RFC keeps older peers — including the
-// stock native-OS clients L2TP/IPsec exists for — willing to do NAT-T at all.
 func natTVendorPayloads() []payload {
-	return []payload{
-		{typ: payloadVendorID, body: natTVendorIDs.rfc3947},
-		{typ: payloadVendorID, body: natTVendorIDs.draft03},
-		{typ: payloadVendorID, body: natTVendorIDs.draft02n},
-		{typ: payloadVendorID, body: natTVendorIDs.draft02},
-	}
+	return []payload{{typ: payloadVendorID, body: natTVendorIDs.rfc3947}}
 }
 
-// peerSupportsNATT reports whether any of the peer's Vendor IDs is a NAT-T one.
 func peerSupportsNATT(payloads []payload) bool {
 	for _, p := range payloads {
-		if p.typ != payloadVendorID {
-			continue
-		}
-		for _, vid := range [][]byte{
-			natTVendorIDs.rfc3947, natTVendorIDs.draft03,
-			natTVendorIDs.draft02n, natTVendorIDs.draft02,
-		} {
-			if constEq(p.body, vid) {
-				return true
-			}
+		if p.typ == payloadVendorID && constEq(p.body, natTVendorIDs.rfc3947) {
+			return true
 		}
 	}
 	return false
@@ -128,7 +98,7 @@ func (s *Session) natdPayloads() []payload {
 func (s *Session) detectNAT(payloads []payload) (localBehind, peerBehind bool) {
 	var got [][]byte
 	for _, p := range payloads {
-		if p.typ == payloadNATD || p.typ == payloadNATDDraft {
+		if p.typ == payloadNATD {
 			got = append(got, p.body)
 		}
 	}

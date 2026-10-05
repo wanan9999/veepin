@@ -70,7 +70,7 @@ type serverRecordHandler struct {
 func (h *serverRecordHandler) Authenticated(u, _ string, nt [mschap.NTResponseLen]byte) {
 	h.authed, h.username, h.ntResponse = true, u, nt
 }
-func (h *serverRecordHandler) NetworkUp()       { h.up = true }
+func (h *serverRecordHandler) NetworkUp(uint16) { h.up = true }
 func (h *serverRecordHandler) Closed(err error) { h.err = err }
 
 // TestServerClientHandshake drives the veepin PPP client against the veepin PPP
@@ -239,3 +239,5 @@ func TestAnEchoOnAClosedLinkSaysSoImmediately(t *testing.T) {
 		t.Errorf("SendEcho on a closed link took %v, want an immediate answer", elapsed)
 	}
 }
+
+func (h *serverRecordHandler) NetworkDown() { h.up = false }

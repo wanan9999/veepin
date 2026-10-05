@@ -145,6 +145,9 @@ func (s *Session) initHandleMM6(first uint8, rest []byte) error {
 	if !ok1 || !ok2 {
 		return fmt.Errorf("ikev1: MM6 missing ID or HASH")
 	}
+	if !validPhase1ID(id.body) {
+		return fmt.Errorf("ikev1: invalid phase-1 identity")
+	}
 	s.idR = append([]byte(nil), id.body...)
 	want := s.keys.hashR(s.localPub, s.peerPub, s.initCookie, s.respCookie, s.saBodyI, s.idR)
 	if !constEq(want, hp.body) {
@@ -176,12 +179,19 @@ func (s *Session) startQuickMode() error {
 	if err != nil {
 		return err
 	}
+	if s.renewalRoot == nil || len(s.qmLocalID) == 0 {
+		s.qmLocalID, s.qmPeerID = buildID(local), buildID(remote)
+	}
+	if s.quickParent != nil && s.cfg.Phase2 == Phase2L2TP && len(s.quickParent.qmLocalID) > 0 {
+		s.qmLocalID, s.qmPeerID = s.quickParent.qmLocalID, s.quickParent.qmPeerID
+	}
 	content := []payload{
 		{typ: payloadSA, body: buildPhase2SA(s.inSPI, props)},
 		{typ: payloadNonce, body: s.qmNi},
-		{typ: payloadID, body: buildID(local)},
-		{typ: payloadID, body: buildID(remote)},
+		{typ: payloadID, body: s.qmLocalID},
+		{typ: payloadID, body: s.qmPeerID},
 	}
+	content = append(content, s.originalAddresses()...)
 	_, contentChain := payloadChain(content)
 	hash1 := s.keys.prf.Apply(s.keys.skeyidA, concat(be32(s.qmMsgID), contentChain))
 
@@ -211,6 +221,10 @@ func (s *Session) initHandleQM2(first uint8, rest []byte) error {
 	want := s.keys.prf.Apply(s.keys.skeyidA, concat(be32(s.qmMsgID), s.qmNi, rawContent))
 	if !constEq(want, hp.body) {
 		return fmt.Errorf("ikev1: QM HASH(2) verification failed")
+	}
+
+	if err := s.acceptSelectors(payloads, true); err != nil {
+		return err
 	}
 
 	proto, spi, transforms, err := parseSA(sa.body)
@@ -363,6 +377,9 @@ func (s *Session) respHandleMM5(first uint8, rest []byte) error {
 	if !ok1 || !ok2 {
 		return fmt.Errorf("ikev1: MM5 missing ID or HASH")
 	}
+	if !validPhase1ID(id.body) {
+		return fmt.Errorf("ikev1: invalid phase-1 identity")
+	}
 	s.idI = append([]byte(nil), id.body...)
 	want := s.keys.hashI(s.peerPub, s.localPub, s.initCookie, s.respCookie, s.saBodyI, s.idI)
 	if !constEq(want, hp.body) {
@@ -403,6 +420,10 @@ func (s *Session) respHandleQM1(h header, first uint8, rest []byte) error {
 		return fmt.Errorf("ikev1: QM HASH(1) verification failed")
 	}
 
+	if err := s.acceptSelectors(payloads, false); err != nil {
+		return err
+	}
+
 	proto, spi, transforms, err := parseSA(sa.body)
 	if err != nil {
 		return err
@@ -432,6 +453,7 @@ func (s *Session) respHandleQM1(h header, first uint8, rest []byte) error {
 			content = append(content, payload{typ: payloadID, body: append([]byte(nil), p.body...)})
 		}
 	}
+	content = append(content, s.originalAddresses()...)
 	_, contentChain := payloadChain(content)
 	hash2 := s.keys.prf.Apply(s.keys.skeyidA, concat(be32(s.qmMsgID), s.qmNi, contentChain))
 	msg := append([]payload{{typ: payloadHash, body: hash2}}, content...)

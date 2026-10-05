@@ -66,10 +66,10 @@ func newESPSA(r ikev1.Result) *esp.SA {
 // wrapUDP prepends the inner UDP header to an L2TP datagram, producing the
 // transport-mode ESP payload. The checksum is left zero: IPv4 UDP permits it,
 // which spares the peer a pseudo-header recomputation after decryption.
-func wrapUDP(l2tp []byte) []byte {
+func wrapUDP(l2tp []byte, source, destination uint16) []byte {
 	out := make([]byte, udpHeaderLen+len(l2tp))
-	binary.BigEndian.PutUint16(out[0:], l2tpUDPPort)
-	binary.BigEndian.PutUint16(out[2:], l2tpUDPPort)
+	binary.BigEndian.PutUint16(out[0:], source)
+	binary.BigEndian.PutUint16(out[2:], destination)
 	binary.BigEndian.PutUint16(out[4:], uint16(udpHeaderLen+len(l2tp)))
 	// out[6:8] checksum stays zero.
 	copy(out[udpHeaderLen:], l2tp)
@@ -78,9 +78,44 @@ func wrapUDP(l2tp []byte) []byte {
 
 // unwrapUDP strips the inner UDP header from a decapsulated transport-mode
 // payload, returning the L2TP datagram.
-func unwrapUDP(inner []byte) ([]byte, bool) {
+func unwrapUDP(inner []byte, policy ikev1.TransportPolicy) ([]byte, bool) {
 	if len(inner) < udpHeaderLen {
 		return nil, false
+	}
+	length := int(binary.BigEndian.Uint16(inner[4:]))
+	if length < udpHeaderLen || length > len(inner) {
+		return nil, false
+	}
+	src, dst := binary.BigEndian.Uint16(inner), binary.BigEndian.Uint16(inner[2:])
+	local := policy.LocalPort
+	if local == 0 {
+		local = l2tpUDPPort
+	}
+	if src == 0 || dst != local || policy.PeerPort != 0 && src != policy.PeerPort {
+		return nil, false
+	}
+	inner = inner[:length]
+	if binary.BigEndian.Uint16(inner[6:]) != 0 {
+		source, destination := policy.PeerIP.To4(), policy.LocalIP.To4()
+		if source == nil || destination == nil {
+			return nil, false
+		}
+		sum := uint32(ipProtoUDP) + uint32(length)
+		for _, b := range [][]byte{source, destination, inner} {
+			for len(b) >= 2 {
+				sum += uint32(binary.BigEndian.Uint16(b))
+				b = b[2:]
+			}
+			if len(b) > 0 {
+				sum += uint32(b[0]) << 8
+			}
+		}
+		for sum>>16 != 0 {
+			sum = (sum & 65535) + (sum >> 16)
+		}
+		if uint16(sum) != 65535 {
+			return nil, false
+		}
 	}
 	return inner[udpHeaderLen:], true
 }

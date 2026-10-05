@@ -46,7 +46,7 @@ func (s *Session) buildDPDNotify(msgType uint16, seq uint32) []byte {
 // parseDPDNotify reads a DPD Notification back, reporting false for a
 // Notification that is not one.
 func parseDPDNotify(body []byte) (msgType uint16, seq uint32, ok bool) {
-	if len(body) < 8 {
+	if len(body) != 8+dpdSPILen+dpdDataLen || binary.BigEndian.Uint32(body) != doiIPsec || body[4] != protoISAKMP || body[5] != dpdSPILen {
 		return 0, 0, false
 	}
 	spiSize := int(body[5])
@@ -146,7 +146,7 @@ func (s *Session) handleDPD(h header, first uint8, rest []byte) error {
 		return nil // a delete or some other notification-free message; nothing to do
 	}
 	msgType, seq, ok := parseDPDNotify(np.body)
-	if !ok {
+	if !ok || !constEq(np.body[8:16], s.initCookie[:]) || !constEq(np.body[16:24], s.respCookie[:]) {
 		return nil
 	}
 	switch msgType {

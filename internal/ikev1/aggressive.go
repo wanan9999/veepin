@@ -141,6 +141,9 @@ func (s *Session) initHandleAM2(h header, first uint8, rest []byte) error {
 	}
 	s.peerPub = append([]byte(nil), ke.body...)
 	s.nr = append([]byte(nil), nc.body...)
+	if !validPhase1ID(id.body) {
+		return fmt.Errorf("ikev1: invalid phase-1 identity")
+	}
 	s.idR = append([]byte(nil), id.body...)
 	if err := s.deriveKeys(); err != nil {
 		return err
@@ -204,6 +207,9 @@ func (s *Session) respHandleAM1(h header, first uint8, rest []byte) error {
 
 	s.peerPub = append([]byte(nil), ke.body...)
 	s.ni = append([]byte(nil), nc.body...)
+	if !validPhase1ID(id.body) {
+		return fmt.Errorf("ikev1: invalid phase-1 identity")
+	}
 	s.idI = append([]byte(nil), id.body...)
 
 	// The group identity travels in the clear precisely so the key it selects is

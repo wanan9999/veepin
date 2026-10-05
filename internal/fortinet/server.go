@@ -477,7 +477,7 @@ func (s *Server) cookieAddr(r *http.Request) (net.IP, bool) {
 type serverLinkHandler struct{}
 
 func (serverLinkHandler) Authenticated(_, _ string, _ [mschap.NTResponseLen]byte) {}
-func (serverLinkHandler) NetworkUp()                                              {}
+func (serverLinkHandler) NetworkUp(uint16)                                        {}
 func (serverLinkHandler) Closed(error)                                            {}
 
 func cookieValueFrom(r *http.Request) string {
@@ -509,3 +509,5 @@ func destAddr(pkt []byte) (netip.Addr, bool) {
 	}
 	return netip.AddrFrom4([4]byte{pkt[16], pkt[17], pkt[18], pkt[19]}), true
 }
+
+func (serverLinkHandler) NetworkDown() {}

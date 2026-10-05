@@ -25,24 +25,21 @@ const (
 // zero value is an unarmed timer. All of its fields are guarded by the owning
 // session's mutex.
 type restartTimer struct {
-	timer *time.Timer
-	tries int
+	timer      *time.Timer
+	tries      int
+	generation uint64
 }
 
 // stop disarms the timer, which is what an incoming Configure-Ack means: the
 // request it covered has been answered.
 func (r *restartTimer) stop() {
+	r.generation++
 	if r.timer != nil {
 		r.timer.Stop()
 		r.timer = nil
 	}
 	r.tries = 0
 }
-
-// alive resets the attempt counter without disarming. Any reply from the peer —
-// including a Nak or a Reject, which answer a request without acknowledging it —
-// proves the link is live, so the budget for the next request starts fresh.
-func (r *restartTimer) alive() { r.tries = 0 }
 
 // arm schedules resend to run under lock after restartInterval, and to keep
 // running until stopped or the attempt budget is spent. expired is called
@@ -51,11 +48,13 @@ func (r *restartTimer) arm(lock func(func()), resend func(), expired func()) {
 	if r.timer != nil {
 		r.timer.Stop()
 	}
+	r.generation++
+	generation := r.generation
 	r.timer = time.AfterFunc(restartInterval, func() {
 		lock(func() {
 			// A stop that raced this firing leaves timer nil; the request it
 			// covered is already answered, so there is nothing to resend.
-			if r.timer == nil {
+			if r.timer == nil || generation != r.generation {
 				return
 			}
 			r.tries++

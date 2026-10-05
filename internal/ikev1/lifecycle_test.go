@@ -302,7 +302,7 @@ func TestFailedRekeyDoesNotExtendHardDeadline(t *testing.T) {
 	}
 	i.mu.Unlock()
 	for range ikeMaxRetransmits + 1 {
-		child.onRetransmit()
+		child.onRetransmitGeneration(child.timerGeneration)
 	}
 	i.mu.Lock()
 	changed, closed := !i.espDeadline.Equal(deadline), i.closed

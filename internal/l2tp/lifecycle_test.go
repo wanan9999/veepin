@@ -55,7 +55,7 @@ func TestAdmissionIsReleasedOnSuccessfulIKE(t *testing.T) {
 func TestUnexpectedListenerExitIsReported(t *testing.T) {
 	s := lifecycleServer(t)
 	// A packet-device mode avoids a host TUN in this unit test.
-	s.cfg.PacketDeviceFactory = func(string, net.IP) (io.ReadWriteCloser, error) { return nil, nil }
+	s.cfg.PacketDeviceFactory = func(string, net.IP, uint16) (io.ReadWriteCloser, error) { return nil, nil }
 	result := make(chan error, 1)
 	go func() { result <- s.Serve() }()
 	_ = s.ikeConn.Close()

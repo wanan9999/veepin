@@ -56,7 +56,7 @@ type PacketDevice = io.ReadWriteCloser
 
 // PacketDeviceFactory runs after PPP authentication and IPCP negotiation. Each
 // session owns its device, including all connections opened by its network stack.
-type PacketDeviceFactory func(username string, address net.IP) (PacketDevice, error)
+type PacketDeviceFactory func(username string, address net.IP, mtu uint16) (PacketDevice, error)
 
 type ServerConfig struct {
 	// PacketDeviceFactory replaces the OS TUN with a per-session userspace device.

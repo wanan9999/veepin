@@ -123,6 +123,9 @@ type Session struct {
 	reqIP, reqDNS1, reqDNS2       net.IP
 	peerIP                        net.IP
 
+	authID                       byte
+	authResponse                 []byte
+	authComplete                 bool
 	authChallenge, peerChallenge [mschap.ChallengeLen]byte
 	ntResponse                   [mschap.NTResponseLen]byte
 
@@ -337,25 +340,23 @@ func (s *Session) handleLCP(payload []byte) {
 	if !ok {
 		return
 	}
-	// Any LCP reply proves the peer is alive, so the Restart budget for the next
-	// request starts fresh.
-	s.lcpRestart.alive()
+
 	switch pkt.Code {
 	case codeConfigureRequest:
 		s.handleLCPConfigReq(pkt)
 	case codeConfigureAck:
-		if pkt.ID == s.lcpReqID {
+		if !s.lcpLocalOpen && matchesAck(pkt, s.lcpConfigReq) {
 			s.lcpRestart.stop()
 			s.lcpLocalOpen = true
 			s.maybeLCPUp()
 		}
 	case codeConfigureNak:
-		if pkt.ID == s.lcpReqID {
+		if !s.lcpLocalOpen && validConfigReply(pkt, s.lcpConfigReq) {
 			s.applyLCPNak(pkt.Body)
 			s.sendLCPConfigReq()
 		}
 	case codeConfigureReject:
-		if pkt.ID == s.lcpReqID {
+		if !s.lcpLocalOpen && validConfigReply(pkt, s.lcpConfigReq) {
 			s.applyLCPReject(pkt.Body)
 			s.sendLCPConfigReq()
 		}
@@ -385,9 +386,10 @@ func (s *Session) handleLCPConfigReq(pkt cpPacket) {
 	var rejected, naked []option
 	for _, o := range opts {
 		switch o.Type {
-		case optMRU, optMagic, optQuality, optPFC, optACFC:
-			// Acceptable: we send full frames regardless, so compression options
-			// only permit, never require, and cost us nothing to accept.
+		case optMRU, optMagic, optPFC, optACFC:
+			if !validLinkOption(o) {
+				rejected = append(rejected, o)
+			}
 		case optAuthProto:
 			if string(o.Value) != string(authMSCHAPv2) {
 				// We only implement MS-CHAPv2. The option is understood but its value
@@ -510,11 +512,22 @@ func (s *Session) handleCHAP(payload []byte) {
 	}
 	switch pkt.Code {
 	case chapChallenge:
+		if s.phase < phaseAuth || !s.peerRequiresAuth {
+			return
+		}
 		ac, _, ok := parseChallenge(pkt.Body)
 		if !ok {
 			s.failLocked(fmt.Errorf("ppp: malformed MS-CHAPv2 challenge"))
 			return
 		}
+		if len(s.authResponse) > 0 && pkt.ID == s.authID && ac == s.authChallenge {
+			s.send(ProtocolCHAP, s.authResponse)
+			return
+		}
+		if s.phase != phaseAuth {
+			return
+		}
+		s.authID = pkt.ID
 		s.authChallenge = ac
 		body, pc, nt, err := buildResponse(ac, s.username, s.password)
 		if err != nil {
@@ -522,16 +535,24 @@ func (s *Session) handleCHAP(payload []byte) {
 			return
 		}
 		s.peerChallenge, s.ntResponse = pc, nt
-		s.send(ProtocolCHAP, cpPacket{Code: chapResponse, ID: pkt.ID, Body: body}.marshal())
+		s.authResponse = cpPacket{Code: chapResponse, ID: pkt.ID, Body: body}.marshal()
+		s.send(ProtocolCHAP, s.authResponse)
 	case chapSuccess:
+		if s.phase != phaseAuth || pkt.ID != s.authID || len(s.authResponse) == 0 || s.authComplete {
+			return
+		}
 		if err := verifySuccess(pkt.Body, s.authChallenge, s.peerChallenge, s.username, s.password, s.ntResponse); err != nil {
 			s.failLocked(err)
 			return
 		}
+		s.authComplete = true
 		s.h.Authenticated(s.ntResponse)
 		s.phase = phaseIPCP
 		s.startIPCP()
 	case chapFailure:
+		if s.phase != phaseAuth || pkt.ID != s.authID {
+			return
+		}
 		s.failLocked(fmt.Errorf("%w: %s", ErrAuth, failureMessage(pkt.Body)))
 	}
 }
@@ -572,12 +593,26 @@ func (s *Session) handleIPCP(payload []byte) {
 	if !ok {
 		return
 	}
-	s.ipcpRestart.alive()
+
 	switch pkt.Code {
 	case codeConfigureRequest:
 		// Accept the server's own IPCP options and record its inner address, which
 		// the tunnel uses as the point-to-point gateway.
-		if opts, ok := parseOptions(pkt.Body); ok {
+		opts, ok := parseOptions(pkt.Body)
+		if !ok {
+			return
+		}
+		var rejected []option
+		for _, o := range opts {
+			if o.Type != optIPAddress || len(o.Value) != 4 {
+				rejected = append(rejected, o)
+			}
+		}
+		if len(rejected) > 0 {
+			s.send(ProtocolIPCP, cpPacket{Code: codeConfigureReject, ID: pkt.ID, Body: marshalOptions(rejected)}.marshal())
+			return
+		}
+		{
 			for _, o := range opts {
 				if o.Type == optIPAddress && len(o.Value) == 4 {
 					s.peerIP = net.IP(append([]byte(nil), o.Value...))
@@ -588,15 +623,21 @@ func (s *Session) handleIPCP(payload []byte) {
 		s.ipcpRemoteOpen = true
 		s.maybeIPCPUp()
 	case codeConfigureAck:
-		if pkt.ID == s.ipcpReqID {
+		if !s.ipcpLocalOpen && matchesAck(pkt, s.ipcpConfigReq) {
 			s.ipcpRestart.stop()
 			s.ipcpLocalOpen = true
 			s.maybeIPCPUp()
 		}
 	case codeConfigureNak:
+		if s.ipcpLocalOpen || !validConfigReply(pkt, s.ipcpConfigReq) {
+			return
+		}
 		s.adoptIPCPValues(pkt.Body)
 		s.sendIPCPConfigReq()
 	case codeConfigureReject:
+		if s.ipcpLocalOpen || !validConfigReply(pkt, s.ipcpConfigReq) {
+			return
+		}
 		s.dropRejectedIPCP(pkt.Body)
 		s.sendIPCPConfigReq()
 	}

@@ -49,8 +49,19 @@ answers the challenge and receives its address and DNS.
   which is why one engine serves SSTP (over TLS), L2TP (over IPsec/UDP), and
   Fortinet (over TLS/DTLS) without change. Don't couple it to any one carrier.
 - **The server *requires* MS-CHAPv2 in its LCP** — a peer offering only PAP won't
-  authenticate against the current server. (xl2tpd's pppd sometimes wants PAP; the
-  L2TP plan flags a small additive PAP path if interop needs it.)
+  authenticate against the current server. PAP-only peers are not supported.
 - **`IsIP`/`EncapsulateIP` are the only network-phase glue** — everything before
   the Network state is control-protocol negotiation, everything after is raw IP
   in/out of the TUN.
+
+Configure-Ack must echo the outstanding request byte-for-byte. Rejects must be
+unchanged ordered subsets; unknown IPCP options and unsupported Quality/LQR
+options are rejected. Magic-Number negotiation is independent of authentication.
+CHAP binds replies to the challenge identifier, retransmits the same challenge,
+and caches Success for duplicate responses without changing account or restarting
+IPCP. Restart callbacks use generations to discard obsolete firings.
+
+Server NetworkDown invalidates the old network lifetime before renegotiation;
+NetworkUp(mtu) publishes the new negotiated send limit. Carrier owners must stop
+forwarding between these callbacks. IPv6CP, PAP and quality monitoring remain
+unsupported; receiving an optional feature is not permission to pretend support.

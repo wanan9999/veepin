@@ -50,8 +50,7 @@ Control vs data is demuxed by the header **T-bit**.
 ## Implementation notes & caveats
 
 - **AVP hiding is not implemented — deliberately.** veepin never sets a tunnel
-  secret, so no outbound AVP is obfuscated; a *hidden inbound* AVP is **rejected**
-  rather than silently mis-parsed. Don't treat that rejection as a bug.
+  secret, so no outbound AVP is obfuscated; mandatory hidden AVPs are rejected and optional hidden AVPs are ignored.
 - **The control channel must be reliable before anything works** — Ns/Nr
   sequencing, acking, and retransmission turn UDP into an ordered channel, exactly
   as [`openvpn/reliable`](../openvpn/reliable) does for OpenVPN (different wire, same
@@ -87,3 +86,24 @@ The receive path keeps unexpired overlapping ESP SAs during rekey and checks
 their deadlines on every packet. Expired index entries are pruned by the monitor.
 Shared CBC/HMAC state is serialized separately in each ESP direction, including
 when a timer sends a control packet concurrently with application traffic.
+
+## Protocol validation and graceful teardown
+
+Control headers require L/S, correct tunnel/session identifiers and the first
+mandatory Message-Type AVP. Required AVPs and lengths are checked; unknown
+mandatory capabilities terminate negotiation instead of being silently accepted.
+A one-message congestion window fits every valid peer receive window. Data
+sequencing follows RFC 2661 section 5.4 and honors Sequencing Required.
+
+The server stops business traffic immediately on graceful close but retains the
+control/ESP mapping for 31 seconds to retransmit StopCCN and acknowledge repeated
+peer close messages. Carrier failure or server shutdown aborts immediately.
+Quick Mode selectors are retained per SA; UDP lengths, ports and nonzero
+checksums are verified using NAT-OA pre-NAT addresses. Initiator ephemeral L2TP
+ports are supported. Only IPv4 transport-mode L2TP is admitted.
+
+PPP network-up supplies the negotiated outbound MTU to PacketDeviceFactory.
+The device must configure its stack with that value. The OS-TUN path fragments
+IPv4 without DF and uses ICMP fragmentation-needed for oversized DF packets;
+shaping cannot pad beyond the peer MRU. These checks are regression coverage,
+not a claim of universal conformance or Windows/iKuai 24-hour certification.

@@ -61,6 +61,7 @@ const (
 // pending is one control message awaiting acknowledgement, kept so it can be
 // rebuilt (with a current Nr) and retransmitted.
 type pending struct {
+	sent      bool
 	ns        uint16
 	sessionID uint16
 	avps      []byte
@@ -72,10 +73,11 @@ type pending struct {
 // is serialised under mu; the data path reads the peer IDs lock-free once the
 // session is up.
 type Tunnel struct {
-	role     Role
-	send     func([]byte) error
-	h        Handler
-	hostName string
+	requireSequence bool
+	role            Role
+	send            func([]byte) error
+	h               Handler
+	hostName        string
 
 	// Peer-assigned IDs addressed outbound messages; written once during the
 	// handshake, then read lock-free by the data path.
@@ -83,7 +85,12 @@ type Tunnel struct {
 	peerSessionID atomic.Uint32
 	// closedFlag lets the lock-free data path (SendPPP) short-circuit without
 	// racing the control channel's state field.
-	closedFlag atomic.Bool
+	closedFlag     atomic.Bool
+	dataMu         sync.Mutex
+	sequenceData   bool
+	dataNS, dataNR uint16
+	drainUntil     time.Time
+	sentNS         uint16
 
 	mu             sync.Mutex
 	state          state
@@ -147,7 +154,20 @@ func (t *Tunnel) SendPPP(frame []byte) error {
 	}
 	tid := uint16(t.peerTunnelID.Load())
 	sid := uint16(t.peerSessionID.Load())
-	return t.send(marshalData(tid, sid, frame))
+	t.dataMu.Lock()
+	defer t.dataMu.Unlock()
+	if !t.sequenceData {
+		return t.send(marshalData(tid, sid, frame))
+	}
+	out := make([]byte, 10+len(frame))
+	out[0] = flagSeq
+	out[1] = protocolVersion
+	binary.BigEndian.PutUint16(out[2:], tid)
+	binary.BigEndian.PutUint16(out[4:], sid)
+	binary.BigEndian.PutUint16(out[6:], t.dataNS)
+	t.dataNS++
+	copy(out[10:], frame)
+	return t.send(out)
 }
 
 // HandleInbound dispatches one received L2TP datagram: data messages hand their
@@ -159,16 +179,55 @@ func (t *Tunnel) HandleInbound(pkt []byte) {
 		return
 	}
 	if !h.isControl {
-		if len(h.payload) > 0 {
-			t.h.DataFrame(h.payload)
+		t.mu.Lock()
+		valid := t.state == stateEstablished && h.tunnelID == t.localTunnelID && h.sessionID == t.localSessionID
+		t.mu.Unlock()
+		if !valid || len(h.payload) == 0 {
+			return
 		}
+		t.dataMu.Lock()
+		if h.hasSeq {
+			if seqLess(h.ns, t.dataNR) {
+				t.dataMu.Unlock()
+				return
+			}
+			t.dataNR = h.ns + 1
+			// An LNS follows the LAC's use of sequencing (RFC 2661 section 5.4).
+			if t.role == RoleLNS {
+				t.sequenceData = true
+			}
+		}
+		if t.role == RoleLNS && !h.hasSeq && !t.requireSequence {
+			t.sequenceData = false
+		}
+		t.dataMu.Unlock()
+		t.h.DataFrame(h.payload)
 		return
 	}
 	t.handleControl(h)
 }
 
 // Close tears the tunnel down, best-effort notifying the peer with CDN/StopCCN.
-func (t *Tunnel) Close() { t.fail(nil) }
+func (t *Tunnel) Close() {
+	t.mu.Lock()
+	if t.state == stateClosed {
+		t.mu.Unlock()
+		return
+	}
+	if t.peerTunnelID.Load() != 0 {
+		t.sendStop(1, 0)
+	}
+	t.mu.Unlock()
+	t.finishClose(nil)
+}
+
+func (t *Tunnel) sendStop(result, code uint16) {
+	var b avpBuilder
+	b.addUint16(avpMessageType, msgStopCCN)
+	b.add(avpResultCode, []byte{byte(result >> 8), byte(result), byte(code >> 8), byte(code)})
+	b.addUint16(avpAssignedTunnelID, t.localTunnelID)
+	t.queueControl(0, b.bytes())
+}
 
 func (t *Tunnel) handleControl(h header) {
 	var (
@@ -177,24 +236,65 @@ func (t *Tunnel) handleControl(h header) {
 		cerr   error
 	)
 	t.mu.Lock()
-	if t.state == stateClosed {
+	initial := false
+	if t.role == RoleLNS && h.tunnelID == 0 && h.sessionID == 0 && h.ns == 0 {
+		if avps, err := parseAVPs(h.payload); err == nil {
+			mt, ok := messageType(avps)
+			initial = ok && mt == msgSCCRQ
+		}
+	}
+	if h.tunnelID != t.localTunnelID && !initial {
 		t.mu.Unlock()
 		return
 	}
-	// The peer's Nr acknowledges everything we sent below it.
-	t.purgeAcked(h.nr)
+	if t.state == stateClosed {
+		if time.Now().Before(t.drainUntil) {
+			t.purgeAcked(h.nr)
+			if len(h.payload) > 0 {
+				if avps, err := parseAVPs(h.payload); err == nil {
+					if mt, ok := messageType(avps); ok && mt == msgStopCCN && h.ns == t.nr && validateControl(mt, avps) == nil {
+						t.nr++
+					}
+				}
+				if seqLess(h.ns, t.nr) {
+					t.sendZLB()
+				}
+			}
+		}
+		t.mu.Unlock()
+		return
+	}
 
 	avps, err := parseAVPs(h.payload)
 	if err != nil {
+		if t.peerTunnelID.Load() != 0 {
+			t.sendStop(2, 2)
+		}
 		t.mu.Unlock()
+		t.finishClose(err)
 		return
 	}
-	// A Zero-Length Body message is a pure acknowledgement: purging above is all
-	// it does.
+	// A Zero-Length Body message consumes no receive sequence number.
 	if len(avps) == 0 {
+		if h.sessionID != 0 && h.sessionID != t.localSessionID {
+			t.mu.Unlock()
+			return
+		}
+		t.purgeAcked(h.nr)
 		t.mu.Unlock()
 		return
 	}
+	mt, valid := messageType(avps)
+	if !valid {
+		t.mu.Unlock()
+		return
+	}
+	sessionMessage := mt == msgICRP || mt == msgICCN || mt == msgCDN || mt == 16
+	if sessionMessage && h.sessionID != t.localSessionID || !sessionMessage && h.sessionID != 0 {
+		t.mu.Unlock()
+		return
+	}
+	t.purgeAcked(h.nr)
 	// Reliable, in-order delivery: only the next expected message advances state;
 	// an old duplicate is re-acknowledged, a future one is dropped to be
 	// retransmitted by the peer.
@@ -208,10 +308,20 @@ func (t *Tunnel) handleControl(h header) {
 	t.nr++
 
 	prevNs := t.ns
-	up, closed, cerr = t.dispatch(avps)
+	if err := validateControl(mt, avps); err != nil {
+		if t.peerTunnelID.Load() == 0 {
+			if id, ok := findUint16(avps, avpAssignedTunnelID); ok {
+				t.peerTunnelID.Store(uint32(id))
+			}
+		}
+		t.sendStop(2, 8)
+		closed, cerr = true, err
+	} else {
+		up, closed, cerr = t.dispatch(avps)
+	}
 	// If dispatch queued no control message, the peer's message is still
 	// unacknowledged; send a bare ZLB ack.
-	if t.ns == prevNs && !closed {
+	if t.ns == prevNs {
 		t.sendZLB()
 	}
 	t.mu.Unlock()
@@ -238,6 +348,7 @@ func (t *Tunnel) dispatch(avps []avp) (up, closed bool, cerr error) {
 	case msgStopCCN:
 		return false, true, fmt.Errorf("l2tp: peer sent StopCCN")
 	case msgCDN:
+		t.sendStop(1, 0) // This implementation owns one call per control connection.
 		return false, true, fmt.Errorf("l2tp: peer disconnected the call")
 	case msgHELLO:
 		return false, false, nil // keepalive; the ZLB ack suffices
@@ -295,6 +406,12 @@ func (t *Tunnel) dispatchLNS(mt uint16, avps []avp) (up, closed bool, cerr error
 		t.sendICRP()
 		t.state = stateWaitICCN
 	case mt == msgICCN && t.state == stateWaitICCN:
+		if _, ok := findAVP(avps, avpSequencingRequired); ok {
+			t.dataMu.Lock()
+			t.sequenceData = true
+			t.requireSequence = true
+			t.dataMu.Unlock()
+		}
 		t.state = stateEstablished
 		return true, false, nil
 	}
@@ -417,7 +534,18 @@ func (t *Tunnel) queueControl(sessionID uint16, avps []byte) {
 	p := pending{ns: t.ns, sessionID: sessionID, avps: avps}
 	t.unacked = append(t.unacked, p)
 	t.ns++
-	_ = t.send(t.buildControl(p))
+	t.flushControl()
+}
+
+// A conservative one-packet congestion window fits every legal advertised
+// receive window and preserves reliable ordering without a second send queue.
+func (t *Tunnel) flushControl() {
+	if len(t.unacked) == 0 || t.unacked[0].sent {
+		return
+	}
+	t.unacked[0].sent = true
+	t.sentNS = t.unacked[0].ns + 1
+	_ = t.send(t.buildControl(t.unacked[0]))
 	t.armTimer()
 }
 
@@ -429,14 +557,14 @@ func (t *Tunnel) buildControl(p pending) []byte {
 // sendZLB emits a Zero-Length Body acknowledgement carrying the current Nr. It
 // consumes no Ns and is never retransmitted.
 func (t *Tunnel) sendZLB() {
-	_ = t.send(marshalControl(uint16(t.peerTunnelID.Load()), 0, t.ns, t.nr, nil))
+	_ = t.send(marshalControl(uint16(t.peerTunnelID.Load()), 0, t.sentNS, t.nr, nil))
 }
 
 // purgeAcked drops unacked messages the peer's Nr covers, and stops the timer
 // once the window is empty. Called under mu.
 func (t *Tunnel) purgeAcked(peerNr uint16) {
 	// An acknowledgement cannot cover a sequence number not yet sent.
-	if seqLess(t.ns, peerNr) {
+	if seqLess(t.sentNS, peerNr) {
 		return
 	}
 	previous := len(t.unacked)
@@ -452,6 +580,7 @@ func (t *Tunnel) purgeAcked(peerNr uint16) {
 		kept = append(kept, p)
 	}
 	t.unacked = kept
+	t.flushControl()
 	if len(t.unacked) < previous {
 		t.retries = 0
 		if t.timer != nil {
@@ -487,7 +616,7 @@ func (t *Tunnel) onRetransmit(generation uint64) {
 		return
 	}
 	t.timer = nil
-	if t.state == stateClosed || len(t.unacked) == 0 {
+	if len(t.unacked) == 0 || t.state == stateClosed && !time.Now().Before(t.drainUntil) {
 		t.mu.Unlock()
 		return
 	}
@@ -497,25 +626,14 @@ func (t *Tunnel) onRetransmit(generation uint64) {
 		t.finishClose(fmt.Errorf("l2tp: control channel timed out"))
 		return
 	}
-	for _, p := range t.unacked {
-		_ = t.send(t.buildControl(p))
+	if t.unacked[0].sent {
+		_ = t.send(t.buildControl(t.unacked[0]))
 	}
 	t.armTimer()
 	t.mu.Unlock()
 }
 
-// fail closes the tunnel from any goroutine, notifying the handler once.
-func (t *Tunnel) fail(err error) {
-	t.mu.Lock()
-	if t.state == stateClosed {
-		t.mu.Unlock()
-		return
-	}
-	t.mu.Unlock()
-	t.finishClose(err)
-}
-
-// finishClose transitions to closed, stops the timer, and notifies the handler
+// finishClose stops data, retains close retransmissions, and notifies the handler
 // exactly once. Safe to call with or without mu held elsewhere because it
 // re-checks state under the lock.
 func (t *Tunnel) finishClose(err error) {
@@ -525,9 +643,10 @@ func (t *Tunnel) finishClose(err error) {
 		return
 	}
 	t.state = stateClosed
+	t.drainUntil = time.Now().Add(31 * time.Second)
 	t.closedFlag.Store(true)
 	t.closeErr = err
-	if t.timer != nil {
+	if t.timer != nil && len(t.unacked) == 0 {
 		t.timer.Stop()
 		t.timer = nil
 		t.timerGeneration++
@@ -555,4 +674,23 @@ func randID() uint16 {
 		id = 1
 	}
 	return id
+}
+
+// Abort releases retransmission state when its carrier has gone away.
+func (t *Tunnel) Abort() {
+	t.mu.Lock()
+	t.state = stateClosed
+	t.closedFlag.Store(true)
+	t.drainUntil = time.Time{}
+	t.timerGeneration++
+	if t.timer != nil {
+		t.timer.Stop()
+		t.timer = nil
+	}
+	t.unacked = nil
+	if t.helloWait != nil {
+		close(t.helloWait)
+		t.helloWait = nil
+	}
+	t.mu.Unlock()
 }

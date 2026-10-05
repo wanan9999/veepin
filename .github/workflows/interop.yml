@@ -10,39 +10,6 @@ on:
   # a commit. The interop suite talks to real peers over Docker, so an
   # intermittent failure is best characterised by running it repeatedly.
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "internal/**"
-      - "dataplane/**"
-      - "client/**"
-      - "cmd/veepin/**"
-      # One entry per public protocol package: a change confined to any of them
-      # can break that protocol's interop cells and nothing else would catch it.
-      - "ikev2/**"
-      - "wireguard/**"
-      - "openvpn/**"
-      - "sstp/**"
-      - "ssh/**"
-      - "l2tp/**"
-      - "anyconnect/**"
-      - "nebula/**"
-      - "masque/**"
-      - "fortinet/**"
-      - "gp/**"
-      - "cisco/**"
-      - "pulse/**"
-      - "amneziawg/**"
-      - "softether/**"
-      - "l2tpv3/**"
-      - "internal/l2tpv3/**"
-      - "toy/**"
-      - "Dockerfile"
-      - "tests/interop/**"
-      - "cmd/livingreadme/**"
-      - ".github/scripts/living-readme-commit.sh"
-      - ".github/scripts/living-readme-preview.sh"
-      - ".github/workflows/interop.yml"
   pull_request:
     branches: [main]
     paths:

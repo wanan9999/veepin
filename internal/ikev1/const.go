@@ -42,22 +42,20 @@ const (
 
 // Payload types (RFC 2408 section 3.1, plus NAT-T from RFC 3947).
 const (
-	payloadNone       = 0
-	payloadSA         = 1
-	payloadProposal   = 2
-	payloadTransform  = 3
-	payloadKE         = 4
-	payloadID         = 5
-	payloadHash       = 8
-	payloadNonce      = 10
-	payloadNotify     = 11
-	payloadDelete     = 12
-	payloadVendorID   = 13
-	payloadAttribute  = 14 // Attribute, carrying XAuth and Mode-Config
-	payloadNATD       = 20 // NAT-Discovery (RFC 3947)
-	payloadNATOA      = 21 // NAT-Original-Address (RFC 3947)
-	payloadNATDDraft  = 130
-	payloadNATOADraft = 131
+	payloadNone      = 0
+	payloadSA        = 1
+	payloadProposal  = 2
+	payloadTransform = 3
+	payloadKE        = 4
+	payloadID        = 5
+	payloadHash      = 8
+	payloadNonce     = 10
+	payloadNotify    = 11
+	payloadDelete    = 12
+	payloadVendorID  = 13
+	payloadAttribute = 14 // Attribute, carrying XAuth and Mode-Config
+	payloadNATD      = 20 // NAT-Discovery (RFC 3947)
+	payloadNATOA     = 21 // NAT-Original-Address (RFC 3947)
 )
 
 // IPsec DOI (RFC 2407).

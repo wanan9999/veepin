@@ -85,6 +85,8 @@ sudo ./veepin connect l2tp \
 
 ## 库集成
 
+L2TP 的 `PacketDeviceFactory(username, address, mtu)` 在认证与 IPCP 完成后创建独立会话设备；网络栈需使用传入的 MTU，不能固定为 1400。
+
 通过公开协议包调用客户端或服务端，具体接口见包文档。`client.Dial` 返回会话及网络配置结果，不自动安装主机路由或地址，由调用方负责应用与清理。
 
 L2TP 的 `ServerConfig.PacketDeviceFactory` 可为每个认证 PPP 会话提供独立 IPv4 数据设备，接入自有用户态网络栈，不必使用系统 TUN 或主机 NAT：

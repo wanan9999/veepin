@@ -1,6 +1,7 @@
 package ppp
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
@@ -19,7 +20,8 @@ type Authenticator func(username string) (password string, ok bool)
 // needs, NetworkUp signals the tunnel can carry IP, and Closed reports teardown.
 type ServerHandler interface {
 	Authenticated(username, password string, ntResponse [mschap.NTResponseLen]byte)
-	NetworkUp()
+	NetworkDown()
+	NetworkUp(mtu uint16)
 	Closed(err error)
 }
 
@@ -42,9 +44,12 @@ type ServerConfig struct {
 // client an address over IPCP. Like the client Session it assumes a reliable,
 // in-order transport and drives purely from received packets.
 type ServerSession struct {
-	cfg ServerConfig
-	tr  Transport
-	h   ServerHandler
+	peerIPCPRequest []byte
+	lcpNoMRU        bool
+	localMRU        uint16
+	cfg             ServerConfig
+	tr              Transport
+	h               ServerHandler
 
 	mu    sync.Mutex
 	phase phase
@@ -56,10 +61,17 @@ type ServerSession struct {
 	lcpLocalOpen, lcpRemoteOpen bool
 	lcpNoMagic                  bool // set if a NoAuth client rejected Magic-Number
 
-	authChallenge [mschap.ChallengeLen]byte
-	username      string
-	password      string
-	ntResponse    [mschap.NTResponseLen]byte
+	authID                                 byte
+	authRequest, authResponse, authSuccess []byte
+	authRestart                            restartTimer
+	peerMRU                                uint16
+	ipcpNoAddress                          bool
+	configChanges                          int
+	peerLCPRequest                         []byte
+	authChallenge                          [mschap.ChallengeLen]byte
+	username                               string
+	password                               string
+	ntResponse                             [mschap.NTResponseLen]byte
 
 	ipcpReqID                     byte
 	ipcpConfigReq                 []byte // the outstanding request, for retransmission
@@ -74,10 +86,12 @@ func NewServer(cfg ServerConfig, tr Transport, h ServerHandler) *ServerSession {
 	var magic [4]byte
 	_, _ = rand.Read(magic[:])
 	return &ServerSession{
-		cfg:   cfg,
-		tr:    tr,
-		h:     h,
-		magic: binary.BigEndian.Uint32(magic[:]),
+		cfg:      cfg,
+		tr:       tr,
+		h:        h,
+		magic:    binary.BigEndian.Uint32(magic[:]),
+		peerMRU:  1500,
+		localMRU: DefaultMRU,
 	}
 }
 
@@ -98,6 +112,7 @@ func (s *ServerSession) Close() {
 	s.phase = phaseClosed
 	s.lcpRestart.stop()
 	s.ipcpRestart.stop()
+	s.authRestart.stop()
 }
 
 // Receive dispatches one inbound PPP frame by protocol.
@@ -115,9 +130,20 @@ func (s *ServerSession) Receive(frame []byte) {
 	case ProtocolLCP:
 		s.handleLCP(payload)
 	case ProtocolCHAP:
-		s.handleCHAP(payload)
+		if s.phase >= phaseAuth {
+			s.handleCHAP(payload)
+		}
+	case ProtocolIP:
+	// The carrier gates IP on NetworkUp; premature data is discarded.
 	case ProtocolIPCP:
-		s.handleIPCP(payload)
+		if s.phase >= phaseIPCP {
+			s.handleIPCP(payload)
+		}
+	default:
+		if s.phase >= phaseAuth {
+			body := append([]byte{byte(protocol >> 8), byte(protocol)}, payload...)
+			s.send(ProtocolLCP, cpPacket{Code: 8, ID: s.nextID(), Body: body[:min(len(body), int(s.peerMRU)-4)]}.marshal())
+		}
 	}
 }
 
@@ -139,6 +165,7 @@ func (s *ServerSession) failLocked(err error) {
 	s.phase = phaseClosed
 	s.lcpRestart.stop()
 	s.ipcpRestart.stop()
+	s.authRestart.stop()
 	s.h.Closed(err)
 }
 
@@ -158,6 +185,9 @@ func (s *ServerSession) sendLCPConfigReq() {
 	var magic [4]byte
 	binary.BigEndian.PutUint32(magic[:], s.magic)
 	var opts []option
+	if !s.lcpNoMRU {
+		opts = append(opts, option{Type: optMRU, Value: []byte{byte(s.localMRU >> 8), byte(s.localMRU)}})
+	}
 	if !s.cfg.NoAuth {
 		// The authenticator is the side that requests an Auth-Protocol; omitting it
 		// is how the peer is told this link does no PPP-level authentication.
@@ -185,34 +215,85 @@ func (s *ServerSession) handleLCP(payload []byte) {
 	if !ok {
 		return
 	}
-	// Any LCP reply proves the peer is alive, so the Restart budget for the next
-	// request starts fresh.
-	s.lcpRestart.alive()
+
 	switch pkt.Code {
 	case codeConfigureRequest:
 		s.handleLCPConfigReq(pkt)
 	case codeConfigureAck:
-		if pkt.ID == s.lcpReqID {
+		if !s.lcpLocalOpen && matchesAck(pkt, s.lcpConfigReq) {
 			s.lcpRestart.stop()
 			s.lcpLocalOpen = true
 			s.maybeLCPUp()
 		}
 	case codeConfigureNak, codeConfigureReject:
-		if s.cfg.NoAuth {
-			// The only option we sent is Magic-Number; a client that will not accept
-			// it can run without it, so drop it and re-request rather than fail.
-			s.lcpNoMagic = true
-			s.sendLCPConfigReq()
+		if s.lcpLocalOpen || !validConfigReply(pkt, s.lcpConfigReq) {
 			return
 		}
-		// The client rejected or naked our request (auth-proto or magic). We require
-		// MS-CHAPv2, so a client that will not accept it cannot proceed.
-		s.failLocked(fmt.Errorf("ppp: client rejected MS-CHAPv2 authentication"))
+		opts, _ := parseOptions(pkt.Body)
+		for _, o := range opts {
+			switch o.Type {
+			case optAuthProto:
+				if pkt.Code == codeConfigureReject || !bytes.Equal(o.Value, authMSCHAPv2) {
+					s.failLocked(fmt.Errorf("ppp: client rejected MS-CHAPv2 authentication"))
+					return
+				}
+			case optMRU:
+				if len(o.Value) != 2 {
+					return
+				}
+				if pkt.Code == codeConfigureReject {
+					s.lcpNoMRU = true
+					s.localMRU = 1500
+				} else {
+					mru := binary.BigEndian.Uint16(o.Value)
+					if mru < 128 {
+						return
+					}
+					s.localMRU = mru
+				}
+			case optMagic:
+				if len(o.Value) != 4 {
+					return
+				}
+				if pkt.Code == codeConfigureReject {
+					s.lcpNoMagic = true
+				} else {
+					var magic [4]byte
+					_, _ = rand.Read(magic[:])
+					s.magic = binary.BigEndian.Uint32(magic[:])
+				}
+			default:
+				return
+			}
+		}
+		s.configChanges++
+		if s.configChanges > maxConfigure {
+			s.failLocked(fmt.Errorf("ppp: LCP negotiation did not converge"))
+			return
+		}
+		s.lcpRestart.stop()
+		s.sendLCPConfigReq()
 	case codeTerminateRequest:
 		s.send(ProtocolLCP, cpPacket{Code: codeTerminateAck, ID: pkt.ID}.marshal())
 		s.failLocked(fmt.Errorf("ppp: client closed the link"))
 	case codeEchoRequest:
-		s.sendEchoReply(pkt)
+		if s.phase >= phaseAuth && len(pkt.Body) >= 4 {
+			s.sendEchoReply(pkt)
+		}
+	case codeEchoReply, codeTerminateAck, 11:
+	case 7:
+		if len(pkt.Body) >= 1 && pkt.Body[0] >= 1 && pkt.Body[0] <= 7 {
+			s.failLocked(fmt.Errorf("ppp: peer rejected required LCP code"))
+		}
+	case 8:
+		if len(pkt.Body) >= 2 {
+			protocol := binary.BigEndian.Uint16(pkt.Body)
+			if protocol == ProtocolLCP || protocol == ProtocolCHAP && !s.cfg.NoAuth || protocol == ProtocolIPCP || protocol == ProtocolIP {
+				s.failLocked(fmt.Errorf("ppp: peer rejected required protocol"))
+			}
+		}
+	default:
+		s.send(ProtocolLCP, cpPacket{Code: 7, ID: s.nextID(), Body: payload[:min(len(payload), int(s.peerMRU)-4)]}.marshal())
 	}
 }
 
@@ -221,11 +302,37 @@ func (s *ServerSession) handleLCPConfigReq(pkt cpPacket) {
 	if !ok {
 		return
 	}
+	if s.phase != phaseLCP {
+		if bytes.Equal(pkt.marshal(), s.peerLCPRequest) {
+			s.send(ProtocolLCP, cpPacket{Code: codeConfigureAck, ID: pkt.ID, Body: pkt.Body}.marshal())
+			return
+		}
+		s.h.NetworkDown()
+		s.phase = phaseLCP
+		s.lcpLocalOpen, s.lcpRemoteOpen = false, false
+		s.ipcpLocalOpen, s.ipcpRemoteOpen = false, false
+		s.authRestart.stop()
+		s.ipcpRestart.stop()
+		s.lcpRestart.stop()
+		s.authRequest, s.authResponse, s.authSuccess = nil, nil, nil
+		s.username, s.password = "", ""
+		s.peerMRU = 1500
+		s.configChanges = 0
+		s.sendLCPConfigReq()
+	}
 	var rejected []option
+	var seen [256]bool
 	for _, o := range opts {
+		if seen[o.Type] {
+			rejected = append(rejected, o)
+			continue
+		}
+		seen[o.Type] = true
 		switch o.Type {
-		case optMRU, optMagic, optQuality, optPFC, optACFC:
-			// Acceptable: we send full frames regardless.
+		case optMRU, optMagic, optPFC, optACFC:
+			if !validLinkOption(o) {
+				rejected = append(rejected, o)
+			}
 		default:
 			rejected = append(rejected, o)
 		}
@@ -234,14 +341,33 @@ func (s *ServerSession) handleLCPConfigReq(pkt cpPacket) {
 		s.send(ProtocolLCP, cpPacket{Code: codeConfigureReject, ID: pkt.ID, Body: marshalOptions(rejected)}.marshal())
 		return
 	}
+	for _, o := range opts {
+		if o.Type == optMagic && binary.BigEndian.Uint32(o.Value) == s.magic && !s.lcpNoMagic {
+			var magic [4]byte
+			_, _ = rand.Read(magic[:])
+			s.send(ProtocolLCP, cpPacket{Code: codeConfigureNak, ID: pkt.ID, Body: marshalOptions([]option{{Type: optMagic, Value: magic[:]}})}.marshal())
+			return
+		}
+		if o.Type == optMRU {
+			mru := binary.BigEndian.Uint16(o.Value)
+			if mru < 128 {
+				s.send(ProtocolLCP, cpPacket{Code: codeConfigureNak, ID: pkt.ID, Body: marshalOptions([]option{{Type: optMRU, Value: []byte{0, 128}}})}.marshal())
+				return
+			}
+			s.peerMRU = mru
+		}
+	}
 	s.send(ProtocolLCP, cpPacket{Code: codeConfigureAck, ID: pkt.ID, Body: pkt.Body}.marshal())
+	s.peerLCPRequest = pkt.marshal()
 	s.lcpRemoteOpen = true
 	s.maybeLCPUp()
 }
 
 func (s *ServerSession) sendEchoReply(req cpPacket) {
 	var magic [4]byte
-	binary.BigEndian.PutUint32(magic[:], s.magic)
+	if !s.lcpNoMagic {
+		binary.BigEndian.PutUint32(magic[:], s.magic)
+	}
 	body := magic[:]
 	if len(req.Body) >= 4 {
 		body = append(magic[:], req.Body[4:]...)
@@ -271,17 +397,36 @@ func (s *ServerSession) sendChallenge() {
 		s.failLocked(fmt.Errorf("ppp: challenge: %w", err))
 		return
 	}
-	s.send(ProtocolCHAP, cpPacket{Code: chapChallenge, ID: s.nextID(), Body: buildChallenge(s.authChallenge, "veepin")}.marshal())
+	s.authID = s.nextID()
+	s.authRequest = cpPacket{Code: chapChallenge, ID: s.authID, Body: buildChallenge(s.authChallenge, "veepin")}.marshal()
+	s.resendChallenge()
+}
+
+func (s *ServerSession) resendChallenge() {
+	s.send(ProtocolCHAP, s.authRequest)
+	if s.phase != phaseAuth {
+		return
+	}
+	s.authRestart.arm(s.withLock, s.resendChallenge, func() { s.failLocked(fmt.Errorf("ppp: authentication timed out")) })
 }
 
 func (s *ServerSession) handleCHAP(payload []byte) {
 	pkt, ok := parseCP(payload)
-	if !ok || pkt.Code != chapResponse {
+	if !ok || pkt.Code != chapResponse || pkt.ID != s.authID {
+		return
+	}
+	if s.phase != phaseAuth {
+		if bytes.Equal(pkt.Body, s.authResponse) && len(s.authSuccess) > 0 {
+			s.send(ProtocolCHAP, s.authSuccess)
+		}
 		return
 	}
 	peerCh, ntResp, username, ok := parseResponse(pkt.Body)
 	if !ok {
-		s.failLocked(fmt.Errorf("ppp: malformed MS-CHAPv2 response"))
+		return
+	}
+	if s.cfg.Auth == nil {
+		s.failLocked(fmt.Errorf("ppp: authenticator unavailable"))
 		return
 	}
 	password, known := s.cfg.Auth(username)
@@ -293,7 +438,13 @@ func (s *ServerSession) handleCHAP(payload []byte) {
 
 	s.username, s.password, s.ntResponse = username, password, ntResp
 	success := buildSuccess(s.authChallenge, peerCh, username, password, ntResp)
-	s.send(ProtocolCHAP, cpPacket{Code: chapSuccess, ID: pkt.ID, Body: success}.marshal())
+	s.authRestart.stop()
+	s.authResponse = bytes.Clone(pkt.Body)
+	s.authSuccess = cpPacket{Code: chapSuccess, ID: pkt.ID, Body: success}.marshal()
+	s.send(ProtocolCHAP, s.authSuccess)
+	if s.phase == phaseClosed {
+		return
+	}
 
 	s.h.Authenticated(username, password, ntResp)
 	s.phase = phaseIPCP
@@ -303,7 +454,10 @@ func (s *ServerSession) handleCHAP(payload []byte) {
 // --- IPCP ---
 
 func (s *ServerSession) sendIPCPConfigReq() {
-	opts := []option{{Type: optIPAddress, Value: s.cfg.ServerIP.To4()}}
+	var opts []option
+	if !s.ipcpNoAddress {
+		opts = append(opts, option{Type: optIPAddress, Value: s.cfg.ServerIP.To4()})
+	}
 	s.ipcpReqID = s.nextID()
 	s.ipcpConfigReq = cpPacket{Code: codeConfigureRequest, ID: s.ipcpReqID, Body: marshalOptions(opts)}.marshal()
 	s.resendIPCPConfigReq()
@@ -323,20 +477,42 @@ func (s *ServerSession) handleIPCP(payload []byte) {
 	if !ok {
 		return
 	}
-	s.ipcpRestart.alive()
+
 	switch pkt.Code {
 	case codeConfigureRequest:
 		s.handleIPCPConfigReq(pkt)
 	case codeConfigureAck:
-		if pkt.ID == s.ipcpReqID {
+		if !s.ipcpLocalOpen && matchesAck(pkt, s.ipcpConfigReq) {
 			s.ipcpRestart.stop()
+			s.authRestart.stop()
 			s.ipcpLocalOpen = true
 			s.maybeIPCPUp()
 		}
 	case codeConfigureNak, codeConfigureReject:
-		// The client naked our server address; drop the disputed option and resend a
-		// bare request, which every client accepts.
+		if s.ipcpLocalOpen || !validConfigReply(pkt, s.ipcpConfigReq) {
+			return
+		}
+		opts, _ := parseOptions(pkt.Body)
+		if len(opts) != 1 || opts[0].Type != optIPAddress || len(opts[0].Value) != 4 {
+			return
+		}
+		// The configured server address is policy, not a peer-controlled assignment.
+		// It can be omitted after a Reject (RFC 1332), but not replaced by a Nak.
+		if pkt.Code == codeConfigureNak {
+			s.failLocked(fmt.Errorf("ppp: peer rejected configured server address"))
+			return
+		}
+		s.ipcpNoAddress = true
+		s.ipcpRestart.stop()
 		s.sendIPCPConfigReq()
+	case codeTerminateRequest:
+		s.send(ProtocolIPCP, cpPacket{Code: codeTerminateAck, ID: pkt.ID}.marshal())
+		s.failLocked(fmt.Errorf("ppp: peer closed IPCP"))
+	case codeTerminateAck:
+	case 7:
+		s.failLocked(fmt.Errorf("ppp: peer rejected IPCP"))
+	default:
+		s.send(ProtocolIPCP, cpPacket{Code: 7, ID: s.nextID(), Body: payload[:min(len(payload), int(s.peerMRU)-4)]}.marshal())
 	}
 }
 
@@ -344,8 +520,33 @@ func (s *ServerSession) handleIPCP(payload []byte) {
 // whose value is not what the server assigns (the client's address and DNS),
 // steering the client to the assigned values; once they match it Acks.
 func (s *ServerSession) handleIPCPConfigReq(pkt cpPacket) {
+	if s.phase == phaseUp {
+		if bytes.Equal(pkt.marshal(), s.peerIPCPRequest) {
+			s.send(ProtocolIPCP, cpPacket{Code: codeConfigureAck, ID: pkt.ID, Body: pkt.Body}.marshal())
+			return
+		}
+		s.h.NetworkDown()
+		s.phase = phaseIPCP
+		s.ipcpLocalOpen, s.ipcpRemoteOpen = false, false
+		s.ipcpRestart.stop()
+		s.sendIPCPConfigReq()
+	}
+
 	opts, ok := parseOptions(pkt.Body)
 	if !ok {
+		return
+	}
+	var rejected []option
+	var seen [256]bool
+	for _, o := range opts {
+		supported := o.Type == optIPAddress || o.Type == optPrimaryDNS && s.dnsAt(0) != nil || o.Type == optSecondaryDNS && s.dnsAt(1) != nil
+		if !supported || len(o.Value) != 4 || seen[o.Type] {
+			rejected = append(rejected, o)
+		}
+		seen[o.Type] = true
+	}
+	if len(rejected) > 0 {
+		s.send(ProtocolIPCP, cpPacket{Code: codeConfigureReject, ID: pkt.ID, Body: marshalOptions(rejected)}.marshal())
 		return
 	}
 	var nak []option
@@ -365,11 +566,15 @@ func (s *ServerSession) handleIPCPConfigReq(pkt cpPacket) {
 			}
 		}
 	}
+	if !seen[optIPAddress] {
+		nak = append(nak, option{Type: optIPAddress, Value: s.cfg.ClientIP.To4()})
+	}
 	if len(nak) > 0 {
 		s.send(ProtocolIPCP, cpPacket{Code: codeConfigureNak, ID: pkt.ID, Body: marshalOptions(nak)}.marshal())
 		return
 	}
 	s.send(ProtocolIPCP, cpPacket{Code: codeConfigureAck, ID: pkt.ID, Body: pkt.Body}.marshal())
+	s.peerIPCPRequest = pkt.marshal()
 	s.ipcpRemoteOpen = true
 	s.maybeIPCPUp()
 }
@@ -386,7 +591,7 @@ func (s *ServerSession) maybeIPCPUp() {
 		return
 	}
 	s.phase = phaseUp
-	s.h.NetworkUp()
+	s.h.NetworkUp(min(s.peerMRU, DefaultMRU))
 }
 
 // ipEq reports whether a 4-byte option value equals an IP address.

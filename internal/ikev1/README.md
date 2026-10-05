@@ -109,3 +109,13 @@ renewal, both Quick Mode roles, lost QM3, authenticated Delete and expiry.
 `../l2tp/engine_test.go` additionally checks real loopback UDP, preserved PPP and
 bidirectional packets after renewal. These are self-interoperability tests;
 Windows, iKuai and independent strongSwan long-run verification are separate gates.
+
+## Wire validation boundaries
+
+NAT-T advertises RFC 3947 only; incompatible draft payload numbering is not
+advertised. UDP transport Quick Mode sends both NAT-OA addresses. Selector pairs,
+reply equality, local L2TP service ports, nonce lengths, ISAKMP version and DPD
+DOI/protocol/SPI/cookie fields are checked. Original addresses and selectors are
+passed with each ESP SA, including overlapping rekeys. The temporarily retained
+TunnelForge MM5/MM6-on-UDP/500 behavior above remains an explicit exception;
+this fork must not be described as having no protocol exceptions.

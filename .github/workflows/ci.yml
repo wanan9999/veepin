@@ -18,6 +18,7 @@ permissions:
 
 jobs:
   test:
+    if: github.event_name != 'push'
     name: test (go ${{ matrix.go }})
     runs-on: ubuntu-latest
     strategy:

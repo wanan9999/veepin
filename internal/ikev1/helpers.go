@@ -89,6 +89,7 @@ func (s *Session) finish() {
 		peerID = s.quickParent.peerID
 	}
 	r := Result{
+		Transport: s.transport,
 		PeerID:    append([]byte(nil), peerID...),
 		Lifetime:  time.Duration(min(s.esp.lifeSeconds, lifetimeSeconds(s.cfg.ESPLifetime))) * time.Second,
 		ByteLimit: uint64(s.esp.lifeKilobytes) * 1024,

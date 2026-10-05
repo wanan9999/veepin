@@ -125,7 +125,7 @@ func TestESPRebindingRequiresIntegrityAndFreshSequence(t *testing.T) {
 	receiver := &esp.SA{SPIIn: 0x12345678, Out: tr, In: tr}
 	p := &serverPeer{srv: &Server{}, nattAddr: original, sa: receiver,
 		tunnel: NewTunnel(RoleLNS, func([]byte) error { return nil }, newEndpoint(RoleLNS))}
-	packet, err := sender.Encapsulate(wrapUDP([]byte{0}), ipProtoUDP)
+	packet, err := sender.Encapsulate(wrapUDP([]byte{0}, l2tpUDPPort, l2tpUDPPort), ipProtoUDP)
 	if err != nil {
 		t.Fatal(err)
 	}

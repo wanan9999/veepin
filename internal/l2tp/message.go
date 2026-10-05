@@ -39,6 +39,8 @@ const (
 // AVP attribute types (RFC 2661 section 4.4), IETF vendor (Vendor ID 0).
 const (
 	avpMessageType         = 0
+	avpResultCode          = 1
+	avpSequencingRequired  = 39
 	avpProtocolVersion     = 2
 	avpFramingCapabilities = 3
 	avpHostName            = 7
@@ -109,6 +111,9 @@ func parseHeader(pkt []byte) (header, error) {
 		return header{}, fmt.Errorf("l2tp: unsupported version %d", pkt[1]&0x0f)
 	}
 	h := header{isControl: flags&flagType != 0}
+	if h.isControl && (flags&(flagLength|flagSeq) != (flagLength|flagSeq) || flags&flagOffset != 0) {
+		return header{}, fmt.Errorf("l2tp: invalid control header flags")
+	}
 	off := 2
 	// Length field, when present, precedes the tunnel/session IDs.
 	var length int
@@ -212,11 +217,16 @@ func parseAVPs(body []byte) ([]avp, error) {
 		}
 		flags := binary.BigEndian.Uint16(body[0:])
 		length := int(flags & 0x03ff)
-		if flags&0x4000 != 0 {
-			return nil, fmt.Errorf("l2tp: hidden AVP not supported")
-		}
+
 		if length < 6 || length > len(body) {
 			return nil, fmt.Errorf("l2tp: AVP length %d out of range", length)
+		}
+		if flags&0x4000 != 0 {
+			if flags&0x8000 != 0 || len(out) == 0 {
+				return nil, fmt.Errorf("l2tp: mandatory hidden AVP requires tunnel authentication")
+			}
+			body = body[length:]
+			continue
 		}
 		out = append(out, avp{
 			mandatory: flags&0x8000 != 0,
@@ -232,8 +242,9 @@ func parseAVPs(body []byte) ([]avp, error) {
 // messageType returns the control message type from the mandatory Message-Type
 // AVP (attribute 0), which RFC 2661 requires to be first.
 func messageType(avps []avp) (uint16, bool) {
-	for _, a := range avps {
-		if a.vendorID == 0 && a.typ == avpMessageType && len(a.value) == 2 {
+	if len(avps) > 0 {
+		a := avps[0]
+		if a.mandatory && a.vendorID == 0 && a.typ == avpMessageType && len(a.value) == 2 {
 			return binary.BigEndian.Uint16(a.value), true
 		}
 	}

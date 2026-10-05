@@ -46,6 +46,7 @@ const (
 // Result is the keyed ESP SA a completed exchange yields, oriented for the local
 // end and expressed in the transform IDs internal/ikev2/esp consumes.
 type Result struct {
+	Transport TransportPolicy
 	// ByteLimit is the negotiated ESP octet limit per direction; zero is unlimited.
 	ByteLimit uint64
 	PeerID    []byte
@@ -217,32 +218,34 @@ const (
 // Session drives one IKEv1 exchange for a single peer. It is transport-neutral:
 // datagrams go out through cfg.Send and come in via HandleInbound.
 type Session struct {
-	dataDeadline      atomic.Int64 // owner-wide current ESP deadline, independent of control SA
-	offeredESP        []espProposal
-	dataRekeyPending  atomic.Bool
-	usedQuickIDs      map[uint32]struct{}
-	controlGeneration uint64
-	baseGeneration    uint64
-	retireTimer       *time.Timer
-	renewalRoot       *Session
-	renewals          map[[8]byte]*Session
-	activeIKE         *Session
-	renewalPending    bool
-	renewAt           time.Time
-	peerID            []byte
-	retired           bool
-	quickParent       *Session
-	exchanges         map[uint32]*Session
-	exchangeExpiry    map[uint32]time.Time
-	lifetimeTimer     *time.Timer
-	ikeDeadline       time.Time
-	espDeadline       time.Time
-	rekeyAt           time.Time
-	closed            bool
-	rekeying          bool
-	established       bool
-	cfg               Config
-	logger            *vlog.Logger
+	transport           TransportPolicy
+	qmLocalID, qmPeerID []byte
+	dataDeadline        atomic.Int64 // owner-wide current ESP deadline, independent of control SA
+	offeredESP          []espProposal
+	dataRekeyPending    atomic.Bool
+	usedQuickIDs        map[uint32]struct{}
+	controlGeneration   uint64
+	baseGeneration      uint64
+	retireTimer         *time.Timer
+	renewalRoot         *Session
+	renewals            map[[8]byte]*Session
+	activeIKE           *Session
+	renewalPending      bool
+	renewAt             time.Time
+	peerID              []byte
+	retired             bool
+	quickParent         *Session
+	exchanges           map[uint32]*Session
+	exchangeExpiry      map[uint32]time.Time
+	lifetimeTimer       *time.Timer
+	ikeDeadline         time.Time
+	espDeadline         time.Time
+	rekeyAt             time.Time
+	closed              bool
+	rekeying            bool
+	established         bool
+	cfg                 Config
+	logger              *vlog.Logger
 
 	mu    sync.Mutex
 	state sessionState
@@ -298,6 +301,7 @@ type Session struct {
 	lastReceived    []byte // exact accepted request that produced lastSent
 	onAuthenticated func() // scoped to the current inbound datagram, under mu
 	timer           *time.Timer
+	timerGeneration uint64
 	retries         int
 }
 
@@ -513,13 +517,15 @@ func (s *Session) armTimer() {
 	if s.timer != nil {
 		s.timer.Stop()
 	}
-	s.timer = time.AfterFunc(ikeRetransmitInterval, s.onRetransmit)
+	s.timerGeneration++
+	generation := s.timerGeneration
+	s.timer = time.AfterFunc(ikeRetransmitInterval, func() { s.onRetransmitGeneration(generation) })
 }
 
-func (s *Session) onRetransmit() {
+func (s *Session) onRetransmitGeneration(generation uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed || s.state == stDone || s.state == stFailed || s.lastSent == nil {
+	if generation != s.timerGeneration || s.closed || s.state == stDone || s.state == stFailed || s.lastSent == nil {
 		return
 	}
 	s.retries++
@@ -528,11 +534,14 @@ func (s *Session) onRetransmit() {
 		return
 	}
 	_ = s.cfg.Send(s.lastSent, s.lastSentNATT)
-	s.timer = time.AfterFunc(ikeRetransmitInterval, s.onRetransmit)
+	s.timerGeneration++
+	generation = s.timerGeneration
+	s.timer = time.AfterFunc(ikeRetransmitInterval, func() { s.onRetransmitGeneration(generation) })
 }
 
 // advance clears the retransmit state once a message is accepted.
 func (s *Session) advance() {
+	s.timerGeneration++
 	if s.timer != nil {
 		s.timer.Stop()
 		s.timer = nil

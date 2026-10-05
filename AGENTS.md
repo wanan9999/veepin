@@ -154,6 +154,10 @@ Roughly the order that works. One commit per phase.
    management panel the browser suite drives renders your protocol's forms. The
    guard in that directory names the import to add.
 
+Ordinary main pushes do not automatically run the CI test job or interop suite.
+Run those explicitly with workflow_dispatch for protocol acceptance; do not use
+commit-message skip markers, which also suppress later tag releases.
+
 ### The gate before pushing
 
 ```sh
@@ -231,6 +235,21 @@ Three rules the suite is built on, each of which it broke once:
   or ask the API.
 
 ## Protocol work: things learned the hard way
+
+- L2TP changes follow RFC 2661/3193/3947, PPP RFC 1661/1332 and CHAP
+  RFC 1994/2759. Keep the explicitly authorized TunnelForge MM5/MM6 UDP/500
+  exception; do not add draft NAT-T advertisements or client-specific parsing.
+- PPP callbacks delimit network lifetimes: NetworkDown stops forwarding before
+  renegotiation; NetworkUp(mtu) creates the per-session device with the negotiated
+  send limit. Duplicate CHAP cannot change the authenticated account or reopen IPCP.
+- Graceful server closure stops data immediately but retains encrypted control
+  state for the 31-second L2TP retry cycle. Fatal carrier shutdown uses Abort.
+  Quick Mode selectors/NAT-OA belong to each SA; validate UDP before rebinding.
+- Standards regressions cover invalid acknowledgements, CHAP loss/duplicates,
+  stale timers, mandatory AVPs, receive windows, close loss, dynamic UDP ports,
+  checksum original addresses and small-MRU fragmentation/PMTU. A green self-test
+  does not establish independent Windows/iKuai interoperability or 24-hour uptime.
+
 
 - IKEv1 responses preserve the selected proposal attributes (RFC 2409 section 5).
   Keep peer offer values separate from local IKE/ESP lifetime ceilings; enforce

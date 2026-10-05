@@ -71,6 +71,9 @@ func parseHeader(pkt []byte) (h header, firstPayload uint8, rest []byte, err err
 	if len(pkt) < isakmpHeaderLen {
 		return header{}, 0, nil, fmt.Errorf("ikev1: message shorter than header")
 	}
+	if pkt[17] != isakmpVersion {
+		return header{}, 0, nil, fmt.Errorf("ikev1: unsupported ISAKMP version")
+	}
 	copy(h.initCookie[:], pkt[0:8])
 	copy(h.respCookie[:], pkt[8:16])
 	firstPayload = pkt[16]
@@ -78,7 +81,7 @@ func parseHeader(pkt []byte) (h header, firstPayload uint8, rest []byte, err err
 	h.flags = pkt[19]
 	h.messageID = binary.BigEndian.Uint32(pkt[20:])
 	length := binary.BigEndian.Uint32(pkt[24:])
-	if int(length) > len(pkt) || length < isakmpHeaderLen {
+	if int(length) != len(pkt) || length < isakmpHeaderLen {
 		return header{}, 0, nil, fmt.Errorf("ikev1: bad message length %d", length)
 	}
 	return h, firstPayload, pkt[isakmpHeaderLen:length], nil
@@ -103,6 +106,9 @@ func parsePayloads(firstType uint8, chain []byte) (payloads []payload, consumed 
 		plen := int(binary.BigEndian.Uint16(rem[2:]))
 		if plen < 4 || plen > len(rem) {
 			return nil, 0, fmt.Errorf("ikev1: payload length %d out of range", plen)
+		}
+		if thisType == payloadNonce && (plen < 12 || plen > 260) {
+			return nil, 0, fmt.Errorf("ikev1: nonce length out of range")
 		}
 		payloads = append(payloads, payload{typ: thisType, body: rem[4:plen]})
 		consumed += plen

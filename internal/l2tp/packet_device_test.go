@@ -46,9 +46,9 @@ func TestSessionPacketAdmission(t *testing.T) {
 func TestClosedSessionDoesNotCreateDevice(t *testing.T) {
 	called := false
 	p := &serverPeer{closed: true, username: "test", srv: &Server{cfg: ServerConfig{
-		PacketDeviceFactory: func(string, net.IP) (io.ReadWriteCloser, error) { called = true; return nil, nil },
+		PacketDeviceFactory: func(string, net.IP, uint16) (io.ReadWriteCloser, error) { called = true; return nil, nil },
 	}}}
-	serverPPP{p}.NetworkUp()
+	serverPPP{p}.NetworkUp(1400)
 	if called {
 		t.Fatal("closed peer created a network stack")
 	}

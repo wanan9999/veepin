@@ -83,7 +83,7 @@ func (c cliPPP) Closed(err error) {
 type srvPPP struct{ e *endpoint }
 
 func (s srvPPP) Authenticated(u, p string, nt [mschap.NTResponseLen]byte) {}
-func (s srvPPP) NetworkUp()                                               { s.e.pppUp <- struct{}{} }
+func (s srvPPP) NetworkUp(uint16)                                         { s.e.pppUp <- struct{}{} }
 func (s srvPPP) Closed(err error) {
 	if err != nil {
 		s.e.errc <- err
@@ -214,3 +214,5 @@ func TestAHelloNobodyAnswersFailsRatherThanHanging(t *testing.T) {
 		t.Errorf("SendHello on a closed tunnel took %v, want an immediate answer", elapsed)
 	}
 }
+
+func (s srvPPP) NetworkDown() {}

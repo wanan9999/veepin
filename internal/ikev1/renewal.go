@@ -52,6 +52,7 @@ func (s *Session) newRenewalLocked(role Role, cookie [8]byte) *Session {
 	child.renewalRoot = s
 	child.baseGeneration = s.controlGeneration
 	child.prop = s.prop
+	child.qmLocalID, child.qmPeerID = s.qmLocalID, s.qmPeerID
 	child.floated = true
 	if role == Responder {
 		child.initCookie = cookie

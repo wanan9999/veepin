@@ -424,7 +424,7 @@ func (c *sstpClient) Authenticated(_, password string, ntResponse [mschap.NTResp
 }
 
 // NetworkUp registers the client so the TUN loop routes its address to it.
-func (c *sstpClient) NetworkUp() {
+func (c *sstpClient) NetworkUp(uint16) {
 	c.srv.register(c)
 	c.srv.logger.Printf("sstp: client %s up, assigned %s", c.conn.RemoteAddr(), c.assignedIP)
 }
@@ -638,3 +638,5 @@ func parseServerOptions(opts map[string]string) (client.Server, error) {
 	}
 	return NewServer(cfg)
 }
+
+func (c *sstpClient) NetworkDown() { c.srv.unregister(c); c.authed = false }

@@ -56,10 +56,11 @@ type NetConfig struct {
 // socket. One local port serves both, which also keeps the source port stable
 // across the float.
 type Client struct {
-	cfg    ClientConfig
-	conn   *net.UDPConn
-	tun    tunIO
-	logger *vlog.Logger
+	transport ikev1.TransportPolicy
+	cfg       ClientConfig
+	conn      *net.UDPConn
+	tun       tunIO
+	logger    *vlog.Logger
 
 	ikeAddr  *net.UDPAddr // peer's IKE port, used until the float
 	nattAddr *net.UDPAddr // peer's NAT-T port: IKE after the float, and all ESP
@@ -246,6 +247,7 @@ func (c *Client) recvLoop() {
 func (c *Client) handleESP(pkt []byte) {
 	c.mu.Lock()
 	sa, tun := c.sa, c.tunnel
+	policy := c.transport
 	if c.sas != nil {
 		if len(pkt) < 4 {
 			c.mu.Unlock()
@@ -257,6 +259,7 @@ func (c *Client) handleESP(pkt []byte) {
 			return
 		}
 		sa = entry.sa
+		policy = entry.transport
 	}
 	active := sa == c.sa
 	c.mu.Unlock()
@@ -270,7 +273,7 @@ func (c *Client) handleESP(pkt []byte) {
 	if active && sa.NeedsRekey() {
 		c.ike.RequestRekey()
 	}
-	if l2, ok := unwrapUDP(inner); ok {
+	if l2, ok := unwrapUDP(inner, policy); ok {
 		tun.HandleInbound(l2)
 	}
 }
@@ -284,6 +287,7 @@ func (c *Client) Established(r ikev1.Result) {
 		return
 	}
 	c.sa = newESPSA(r)
+	c.transport = r.Transport
 	if c.sas == nil {
 		c.sas = make(map[uint32]timedSA)
 	}
@@ -293,7 +297,7 @@ func (c *Client) Established(r ikev1.Result) {
 			delete(c.sas, spi)
 		}
 	}
-	c.sas[r.InSPI] = timedSA{sa: c.sa, expires: now.Add(r.Lifetime)}
+	c.sas[r.InSPI] = timedSA{sa: c.sa, expires: now.Add(r.Lifetime), transport: r.Transport}
 	if c.tunnel != nil {
 		c.mu.Unlock()
 		return
@@ -318,7 +322,7 @@ func (c *Client) espSend(l2tp []byte) error {
 	if sa.NeedsRekey() {
 		c.ike.RequestRekey()
 	}
-	pkt, err := sa.Encapsulate(wrapUDP(l2tp), ipProtoUDP)
+	pkt, err := sa.Encapsulate(wrapUDP(l2tp, l2tpUDPPort, l2tpUDPPort), ipProtoUDP)
 	if err != nil {
 		return err
 	}
