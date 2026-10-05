@@ -4,15 +4,24 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"iter"
 )
 
 // Attribute order and integer encoding may differ, values and presence may
 // not (RFC 2409 section 5 and Appendix A). Lifetime unit/duration pairing is
 // separately validated by proposalLifetimes before this comparison.
 func matchesOfferedTransform(selected parsedTransform, offer []byte) bool {
-	proto, _, transforms, err := parseSA(offer)
+	proposals, err := parseSA(offer)
 	if err != nil {
 		return false
+	}
+	var proto uint8
+	var transforms []parsedTransform
+	for p := range standaloneProposals(proposals) {
+		if p.number == selected.proposal {
+			proto, transforms = p.proto, p.transforms
+			break
+		}
 	}
 	typeID, durationID := uint16(attrLifeType), uint16(attrLifeDuration)
 	if proto == protoESP {
@@ -163,70 +172,148 @@ type parsedTransform struct {
 	attrs    []attr
 }
 
-// parseSA decodes an SA payload body into its protocol ID, SPI, and the list of
-// transforms in its single proposal. It handles both phase-1 (ISAKMP, no SPI)
-// and phase-2 (ESP, 4-octet SPI) SAs, which share this structure.
-func parseSA(body []byte) (proto uint8, spi []byte, transforms []parsedTransform, err error) {
+// parsedProposal keeps each alternative's SPI and transforms together. Equal
+// proposal numbers form an inseparable protocol bundle (RFC 2408 section 4.2).
+type parsedProposal struct {
+	number     uint8
+	proto      uint8
+	spi        []byte
+	transforms []parsedTransform
+}
+
+// parseSA validates the whole proposal/transform chain before selection. A
+// later malformed proposal cannot be hidden behind an acceptable first one.
+func parseSA(body []byte) ([]parsedProposal, error) {
 	if len(body) < 8 {
-		return 0, nil, nil, fmt.Errorf("ikev1: SA body too short")
+		return nil, fmt.Errorf("ikev1: SA body too short")
 	}
 	if binary.BigEndian.Uint32(body[:4]) != doiIPsec || binary.BigEndian.Uint32(body[4:8]) != situationIdentityOnly {
-		return 0, nil, nil, fmt.Errorf("ikev1: unsupported DOI or situation")
+		return nil, fmt.Errorf("ikev1: unsupported DOI or situation")
 	}
 	chain := body[8:]
-	if len(chain) < 4 {
-		return 0, nil, nil, fmt.Errorf("ikev1: SA without a proposal")
+	if len(chain) == 0 {
+		return nil, fmt.Errorf("ikev1: SA without a proposal")
 	}
-	propLen := int(binary.BigEndian.Uint16(chain[2:]))
-	if propLen < 8 || propLen > len(chain) {
-		return 0, nil, nil, fmt.Errorf("ikev1: proposal length out of range")
+	var proposals []parsedProposal
+	var lastProposal uint8
+	for len(chain) != 0 {
+		if len(chain) < 8 {
+			return nil, fmt.Errorf("ikev1: truncated proposal")
+		}
+		size := int(binary.BigEndian.Uint16(chain[2:]))
+		if size < 8 || size > len(chain) {
+			return nil, fmt.Errorf("ikev1: proposal length out of range")
+		}
+		next := uint8(payloadNone)
+		if size < len(chain) {
+			next = payloadProposal
+		}
+		if chain[0] != next || chain[4] < lastProposal {
+			return nil, fmt.Errorf("ikev1: invalid proposal chain")
+		}
+		lastProposal = chain[4]
+		prop := chain[4:size]
+		spiSize, ntrans := int(prop[2]), int(prop[3])
+		if ntrans == 0 {
+			return nil, fmt.Errorf("ikev1: empty proposal")
+		}
+		if len(prop) < 4+spiSize {
+			return nil, fmt.Errorf("ikev1: proposal SPI overruns")
+		}
+		p := parsedProposal{number: prop[0], proto: prop[1], spi: prop[4 : 4+spiSize]}
+		tchain := prop[4+spiSize:]
+		var lastTransform uint8
+		for i := range ntrans {
+			if len(tchain) < 8 {
+				return nil, fmt.Errorf("ikev1: truncated transform")
+			}
+			size := int(binary.BigEndian.Uint16(tchain[2:]))
+			if size < 8 || size > len(tchain) {
+				return nil, fmt.Errorf("ikev1: transform length out of range")
+			}
+			next := uint8(payloadNone)
+			if i < ntrans-1 {
+				next = payloadTransform
+			}
+			if tchain[0] != next || (i > 0 && tchain[4] <= lastTransform) {
+				return nil, fmt.Errorf("ikev1: invalid transform chain")
+			}
+			lastTransform = tchain[4]
+			attrs, err := parseAttrs(tchain[8:size])
+			if err != nil {
+				return nil, err
+			}
+			p.transforms = append(p.transforms, parsedTransform{proposal: p.number, num: tchain[4], id: tchain[5], attrs: attrs})
+			tchain = tchain[size:]
+		}
+		if len(tchain) != 0 {
+			return nil, fmt.Errorf("ikev1: trailing transform data")
+		}
+		proposals = append(proposals, p)
+		chain = chain[size:]
 	}
-	prop := chain[4:propLen] // proposal body
-	if len(prop) < 4 {
-		return 0, nil, nil, fmt.Errorf("ikev1: truncated proposal")
-	}
-	proto = prop[1]
-	// This implementation negotiates one protocol proposal with alternative
-	// transforms, never a multi-protocol bundle. Reject rather than ignore it.
-	if propLen != len(chain) || chain[0] != payloadNone || prop[0] == 0 {
-		return 0, nil, nil, fmt.Errorf("ikev1: unsupported proposal chain")
-	}
-	spiSize := int(prop[2])
-	ntrans := int(prop[3])
-	if ntrans == 0 {
-		return 0, nil, nil, fmt.Errorf("ikev1: empty proposal")
-	}
-	if len(prop) < 4+spiSize {
-		return 0, nil, nil, fmt.Errorf("ikev1: proposal SPI overruns")
-	}
-	spi = append([]byte(nil), prop[4:4+spiSize]...)
-	tchain := prop[4+spiSize:]
+	return proposals, nil
+}
 
-	var lastNumber uint8
-	for i := range ntrans {
-		if len(tchain) < 4 {
-			return 0, nil, nil, fmt.Errorf("ikev1: truncated transform header")
-		}
-		tlen := int(binary.BigEndian.Uint16(tchain[2:]))
-		if tlen < 8 || tlen > len(tchain) {
-			return 0, nil, nil, fmt.Errorf("ikev1: transform length out of range")
-		}
-		tbody := tchain[4:tlen]
-		if tbody[0] <= lastNumber || (i == ntrans-1 && tchain[0] != payloadNone) || (i < ntrans-1 && tchain[0] != payloadTransform) {
-			return 0, nil, nil, fmt.Errorf("ikev1: invalid transform chain")
-		}
-		lastNumber = tbody[0]
-		attrs, aerr := parseAttrs(tbody[4:])
-		if aerr != nil {
-			return 0, nil, nil, aerr
-		}
-		transforms = append(transforms, parsedTransform{proposal: prop[0], num: tbody[0], id: tbody[1], attrs: attrs})
-		tchain = tchain[tlen:]
+// parseSingleProposalSA is used for selected responses: we only offer single
+// protocol suites, so a response containing alternatives or a bundle is invalid.
+func parseSingleProposalSA(body []byte) (uint8, []byte, []parsedTransform, error) {
+	proposals, err := parseSA(body)
+	if err != nil {
+		return 0, nil, nil, err
 	}
-	if len(tchain) != 0 {
-		return 0, nil, nil, fmt.Errorf("ikev1: trailing transform data")
+	if len(proposals) != 1 {
+		return 0, nil, nil, fmt.Errorf("ikev1: response must select one proposal")
 	}
-	return proto, spi, transforms, nil
+	p := proposals[0]
+	return p.proto, p.spi, p.transforms, nil
+}
+
+// standaloneProposals excludes every member of a multi-protocol AND bundle.
+// Unsupported suites may be skipped only as a whole, never silently weakened.
+func standaloneProposals(proposals []parsedProposal) iter.Seq[parsedProposal] {
+	return func(yield func(parsedProposal) bool) {
+		for i, p := range proposals {
+			if i > 0 && proposals[i-1].number == p.number || i+1 < len(proposals) && proposals[i+1].number == p.number {
+				continue
+			}
+			if !yield(p) {
+				return
+			}
+		}
+	}
+}
+
+func (s *Session) selectIKEOffer(body []byte) (ikeProposal, parsedTransform, error) {
+	proposals, err := parseSA(body)
+	if err != nil {
+		return ikeProposal{}, parsedTransform{}, err
+	}
+	for p := range standaloneProposals(proposals) {
+		if p.proto != protoISAKMP || len(p.spi) != 0 {
+			continue
+		}
+		if suite, transform, ok := s.selectIKEProposal(p.transforms); ok {
+			return suite, transform, nil
+		}
+	}
+	return ikeProposal{}, parsedTransform{}, fmt.Errorf("ikev1: no acceptable IKE proposal offered")
+}
+
+func (s *Session) selectESPOffer(body []byte) (espProposal, parsedTransform, []byte, error) {
+	proposals, err := parseSA(body)
+	if err != nil {
+		return espProposal{}, parsedTransform{}, nil, err
+	}
+	for p := range standaloneProposals(proposals) {
+		if p.proto != protoESP || len(p.spi) != 4 {
+			continue
+		}
+		if suite, transform, ok := s.selectESPProposal(p.transforms); ok {
+			return suite, transform, p.spi, nil
+		}
+	}
+	return espProposal{}, parsedTransform{}, nil, fmt.Errorf("ikev1: no acceptable ESP proposal offered")
 }
 
 // espProposal is a phase-2 (IPsec ESP) cipher suite for Quick Mode.

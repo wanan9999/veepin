@@ -87,8 +87,10 @@ lifetime wins locally. Main/Aggressive/Quick Mode responses preserve the selecte
 offer's attributes, including omitted and volume lifetimes (RFC 2409 section 5).
 The local timer limit is not written back into the response. Initiators reject
 modified attributes; unknown or duplicate attributes are not silently accepted.
-SA parsing supports a single protocol proposal with alternative transforms;
-multi-proposal bundles are explicitly rejected rather than partially accepted.
+SA parsing supports numbered alternative proposals and alternative transforms,
+preserving the chosen proposal's SPI and attributes, including zero-based
+proposal/transform numbering. Same-number multi-protocol
+bundles are skipped as a whole; an ESP member is never selected on its own.
 ESP renews at 80% (initiator) or 90% (responder); IKE starts fresh
 Main Mode at 75%. IKE renewal uses UDP/4500 and new cookies/DH/nonces, checks the
 same authenticated identity, and keeps the existing PPP session. Multiple control SAs can coexist after crossed renewal; the two peers need

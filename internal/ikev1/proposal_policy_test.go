@@ -70,11 +70,11 @@ func TestPreKeyInformationalIsLoggedWithoutChangingSession(t *testing.T) {
 
 func TestSelectedOfferPreservesOmittedAndVolumeLifetimes(t *testing.T) {
 	for _, raw := range [][]byte{wireHex(t, tunnelForgeIKE), wireHex(t, tunnelForgeESP)} {
-		proto, spi, ts, err := parseSA(raw)
+		proto, spi, ts, err := parseSingleProposalSA(raw)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _, selected, err := parseSA(buildSelectedSA(proto, spi, ts[0]))
+		_, _, selected, err := parseSingleProposalSA(buildSelectedSA(proto, spi, ts[0]))
 		if err != nil || !bytes.Equal(encodeAttrs(selected[0].attrs), encodeAttrs(ts[0].attrs)) {
 			t.Fatalf("omitted attributes were inserted: %v", err)
 		}
@@ -82,7 +82,7 @@ func TestSelectedOfferPreservesOmittedAndVolumeLifetimes(t *testing.T) {
 	p := espProposal{transformID: espTransformAES, keyBits: 256, authAlg: authHMACSHA, encap: encapUDPTransport, lifeSeconds: 28800, lifeKilobytes: 500000}
 	attrs, _ := parseAttrs(p.attrs())
 	ts := []parsedTransform{{proposal: 1, num: 3, id: espTransformAES, attrs: attrs}}
-	_, _, selected, err := parseSA(buildSelectedSA(protoESP, be32(42), ts[0]))
+	_, _, selected, err := parseSingleProposalSA(buildSelectedSA(protoESP, be32(42), ts[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestSelectedOfferPreservesOmittedAndVolumeLifetimes(t *testing.T) {
 
 func TestInitiatorRejectsRewrittenOffer(t *testing.T) {
 	offer := buildPhase1SA(defaultIKEProposals(authPSK))
-	_, _, ts, err := parseSA(offer)
+	_, _, ts, err := parseSingleProposalSA(offer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestInitiatorRejectsRewrittenOffer(t *testing.T) {
 func TestInitiatorRejectsSwappedLifetimeUnits(t *testing.T) {
 	p := espProposal{transformID: espTransformAES, keyBits: 256, authAlg: authHMACSHA, encap: encapUDPTransport, lifeSeconds: 28800, lifeKilobytes: 500000}
 	offer := buildPhase2SA(42, []espProposal{p})
-	_, _, ts, err := parseSA(offer)
+	_, _, ts, err := parseSingleProposalSA(offer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,14 +143,11 @@ func TestInitiatorRejectsSwappedLifetimeUnits(t *testing.T) {
 }
 
 func TestMalformedProposalStructureIsRejected(t *testing.T) {
-	for _, offset := range []int{3, 7, 8, 12, 15, 16, 20} {
+	for _, offset := range []int{3, 7, 8, 15, 16, 20} {
 		offer := buildPhase1SA(defaultIKEProposals(authPSK))
 		// DOI, situation, proposal chain/number/count and transform chain/number.
 		offer[offset] = 0xff
-		if offset == 12 {
-			offer[offset] = 0 // Proposal numbers begin at one.
-		}
-		if _, _, _, err := parseSA(offer); err == nil {
+		if _, _, _, err := parseSingleProposalSA(offer); err == nil {
 			t.Fatalf("malformed structure accepted at offset %d", offset)
 		}
 	}

@@ -106,7 +106,7 @@ func (s *Session) initHandleAM2(h header, first uint8, rest []byte) error {
 	if !ok {
 		return fmt.Errorf("ikev1: AM2 without SA")
 	}
-	proto, spi, transforms, err := parseSA(sa.body)
+	proto, spi, transforms, err := parseSingleProposalSA(sa.body)
 	if err != nil {
 		return err
 	}
@@ -188,16 +188,9 @@ func (s *Session) respHandleAM1(h header, first uint8, rest []byte) error {
 		return fmt.Errorf("ikev1: AM1 missing SA, KE, Nonce or ID")
 	}
 	s.saBodyI = append([]byte(nil), sa.body...)
-	proto, spi, transforms, err := parseSA(sa.body)
+	prop, num, err := s.selectIKEOffer(sa.body)
 	if err != nil {
 		return err
-	}
-	if proto != protoISAKMP || len(spi) != 0 {
-		return fmt.Errorf("ikev1: phase-1 SA malformed")
-	}
-	prop, num, ok := s.selectIKEProposal(transforms)
-	if !ok {
-		return fmt.Errorf("ikev1: no acceptable IKE proposal offered")
 	}
 	s.prop = prop
 	s.peerNATT = peerSupportsNATT(payloads)

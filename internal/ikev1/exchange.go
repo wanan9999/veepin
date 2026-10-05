@@ -59,7 +59,7 @@ func (s *Session) initHandleMM2(h header, first uint8, rest []byte) error {
 	if !ok {
 		return fmt.Errorf("ikev1: MM2 without SA")
 	}
-	proto, spi, transforms, err := parseSA(sa.body)
+	proto, spi, transforms, err := parseSingleProposalSA(sa.body)
 	if err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func (s *Session) initHandleQM2(first uint8, rest []byte) error {
 		return err
 	}
 
-	proto, spi, transforms, err := parseSA(sa.body)
+	proto, spi, transforms, err := parseSingleProposalSA(sa.body)
 	if err != nil {
 		return err
 	}
@@ -288,16 +288,9 @@ func (s *Session) respHandleMM1(h header, first uint8, rest []byte) error {
 		return fmt.Errorf("ikev1: MM1 without SA")
 	}
 	s.saBodyI = append([]byte(nil), sa.body...) // initiator's SA body, for HASH
-	proto, spi, transforms, err := parseSA(sa.body)
+	prop, num, err := s.selectIKEOffer(sa.body)
 	if err != nil {
 		return err
-	}
-	if proto != protoISAKMP || len(spi) != 0 {
-		return fmt.Errorf("ikev1: phase-1 SA malformed")
-	}
-	prop, num, ok := s.selectIKEProposal(transforms)
-	if !ok {
-		return fmt.Errorf("ikev1: no acceptable IKE proposal offered")
 	}
 	s.prop = prop
 	s.peerNATT = peerSupportsNATT(payloads)
@@ -424,16 +417,9 @@ func (s *Session) respHandleQM1(h header, first uint8, rest []byte) error {
 		return err
 	}
 
-	proto, spi, transforms, err := parseSA(sa.body)
+	esp, num, spi, err := s.selectESPOffer(sa.body)
 	if err != nil {
 		return err
-	}
-	if proto != protoESP || len(spi) != 4 {
-		return fmt.Errorf("ikev1: QM1 SA malformed")
-	}
-	esp, num, ok := s.selectESPProposal(transforms)
-	if !ok {
-		return fmt.Errorf("ikev1: no acceptable ESP proposal offered")
 	}
 	s.esp = esp
 	s.authenticatedInbound()

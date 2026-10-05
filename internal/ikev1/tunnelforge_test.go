@@ -29,7 +29,7 @@ func wireHex(t *testing.T, s string) []byte {
 
 func TestTunnelForgeProposalsSelectAES128Without3DES(t *testing.T) {
 	s := NewSession(Config{Role: Responder})
-	_, _, transforms, err := parseSA(wireHex(t, tunnelForgeIKE))
+	_, _, transforms, err := parseSingleProposalSA(wireHex(t, tunnelForgeIKE))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestTunnelForgeProposalsSelectAES128Without3DES(t *testing.T) {
 	if _, _, ok := s.selectIKEProposal(transforms[1:]); ok {
 		t.Fatal("3DES-only IKE offer accepted")
 	}
-	_, _, transforms, err = parseSA(wireHex(t, tunnelForgeESP))
+	_, _, transforms, err = parseSingleProposalSA(wireHex(t, tunnelForgeESP))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,14 +90,14 @@ func TestAES128CompatibilityDoesNotChangeOtherProfiles(t *testing.T) {
 // then move UDP bytes both ways with the derived ESP keys. This is a wire-level
 // regression, not a claim that the Android application has been exercised.
 func TestTunnelForgeAES128MainQuickModeAndESP(t *testing.T) {
-	runTunnelForgeHandshake(t, false)
+	runAES128Handshake(t, false, wireHex(t, tunnelForgeESP))
 }
 
 func TestTunnelForgeAES128RejectsWrongPSK(t *testing.T) {
-	runTunnelForgeHandshake(t, true)
+	runAES128Handshake(t, true, wireHex(t, tunnelForgeESP))
 }
 
-func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
+func runAES128Handshake(t *testing.T, wrongPSK bool, phase2Offer []byte) {
 	t.Helper()
 	result := newCapture()
 	out := make(chan []byte, 16)
@@ -301,7 +301,7 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 	h.exchange, h.messageID = exchangeQuick, 0x10203040
 	iv := keys.quickModeIV(h.messageID)
 	qmNi := bytes.Repeat([]byte{0x42}, 32)
-	content := []payload{{typ: payloadSA, body: wireHex(t, tunnelForgeESP)}, {typ: payloadNonce, body: qmNi},
+	content := []payload{{typ: payloadSA, body: phase2Offer}, {typ: payloadNonce, body: qmNi},
 		{typ: payloadID, body: buildID(l2tpSelector(net.IPv4(192, 0, 2, 2)))},
 		{typ: payloadID, body: buildID(l2tpSelector(net.IPv4(192, 0, 2, 1)))}}
 	_, chain := payloadChain(content)
@@ -314,12 +314,15 @@ func runTunnelForgeHandshake(t *testing.T, wrongPSK bool) {
 	if !bytes.Equal(body(qm2, payloadHash), prf.Apply(keys.skeyidA, concat(be32(h.messageID), qmNi, afterHash(plain, qm2, consumed)))) {
 		t.Fatal("responder HASH(2) did not authenticate")
 	}
-	_, spi, transforms, err := parseSA(body(qm2, payloadSA))
+	_, spi, transforms, err := parseSingleProposalSA(body(qm2, payloadSA))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(transforms) != 1 {
 		t.Fatal("responder did not select exactly one ESP transform")
+	}
+	if !matchesOfferedTransform(transforms[0], phase2Offer) {
+		t.Fatal("responder changed the selected proposal or transform")
 	}
 	chosen, ok := espPropFromAttrs(transforms[0].id, transforms[0].attrs)
 	if !ok || chosen.keyBits != 128 || chosen.authAlg != authHMACSHA {

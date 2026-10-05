@@ -1,6 +1,9 @@
 package ikev1
 
-import "testing"
+import (
+	"encoding/hex"
+	"testing"
+)
 
 // Fuzz targets for the ISAKMP/IKEv1 codec.
 //
@@ -35,7 +38,7 @@ func FuzzParsePayloads(f *testing.F) {
 		// The SA payload nests transforms and attributes, which is the deepest
 		// untrusted structure in this protocol; walk it the way the exchange does.
 		for _, p := range payloads {
-			_, _, _, _ = parseSA(p.body)
+			_, _ = parseSA(p.body)
 			_, _ = parseAttrs(p.body)
 		}
 	})
@@ -53,9 +56,16 @@ func FuzzParseAttrs(f *testing.F) {
 func FuzzParseSA(f *testing.F) {
 	f.Add([]byte{})
 	f.Add(make([]byte, 16))
+	f.Add(buildPhase1SA(defaultIKEProposals(authPSK)))
+	// Exercise valid multi-proposal chains as well as malformed byte strings.
+	fixture, err := hex.DecodeString(alternativeESP)
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(fixture)
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _, _, _ = parseSA(data)
+		_, _ = parseSA(data)
 	})
 }
 
