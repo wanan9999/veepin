@@ -238,6 +238,10 @@ Three rules the suite is built on, each of which it broke once:
   Cover unequal lifetimes with strict initiator validation, omitted/volume
   attributes and a synthetic Windows-style offer. Plaintext pre-key errors are
   logged as unauthenticated; they cannot terminate an established session.
+  Normal strongSwan initiator fixtures use finite IKE/ESP lifetimes that differ
+  from the server's local ceiling. Do not disable rekeying and accidentally
+  turn normal interoperability tests into zero-lifetime rejection cases;
+  zero-lifetime rejection remains covered by the IKE unit tests.
 
 - **Read the reference implementation's source, not a summary of it.** For
   Pulse, the cipher identifiers in my own plan were wrong (`AES-128-CBC` is 2 and
