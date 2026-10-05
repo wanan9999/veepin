@@ -95,7 +95,7 @@ func TestProposalChainValidatesAllBoundaries(t *testing.T) {
 	}
 }
 
-func TestPhaseOneAlternativeProposalSelection(t *testing.T) {
+func TestPhaseOneRequiresOneProposalButAllowsZeroNumbering(t *testing.T) {
 	s := &Session{cfg: Config{Role: Responder}}
 	p := defaultIKEProposals(authPSK)[0]
 	tr := buildTransform(payloadNone, 1, transformKeyIKE, p.attrs())
@@ -103,13 +103,12 @@ func TestPhaseOneAlternativeProposalSelection(t *testing.T) {
 	bad[5] = 255
 	offer := append(saPrefix(), buildProposal(payloadProposal, 1, protoISAKMP, nil, 1, bad)...)
 	offer = append(offer, buildProposal(payloadNone, 2, protoISAKMP, nil, 1, tr)...)
-	_, selected, err := s.selectIKEOffer(offer)
-	if err != nil || selected.proposal != 2 || !matchesOfferedTransform(selected, offer) {
-		t.Fatalf("valid phase-one alternative rejected: %v", err)
+	if _, _, err := s.selectIKEOffer(offer); err == nil {
+		t.Fatal("phase one accepted multiple Proposal payloads contrary to RFC 2409 section 5")
 	}
 	zero := append(saPrefix(), buildProposal(payloadNone, 0, protoISAKMP, nil, 1, tr)...)
 	zero[20] = 0
-	_, selected, err = s.selectIKEOffer(zero)
+	_, selected, err := s.selectIKEOffer(zero)
 	if err != nil || selected.proposal != 0 || selected.num != 0 || !matchesOfferedTransform(selected, zero) {
 		t.Fatalf("zero-numbered phase-one proposal rejected: %v", err)
 	}

@@ -255,15 +255,15 @@ func parseSA(body []byte) ([]parsedProposal, error) {
 	return proposals, nil
 }
 
-// parseSingleProposalSA is used for selected responses: we only offer single
-// protocol suites, so a response containing alternatives or a bundle is invalid.
+// parseSingleProposalSA enforces RFC 2409 section 5 for phase one and validates
+// selected responses to our own single-protocol offers.
 func parseSingleProposalSA(body []byte) (uint8, []byte, []parsedTransform, error) {
 	proposals, err := parseSA(body)
 	if err != nil {
 		return 0, nil, nil, err
 	}
 	if len(proposals) != 1 {
-		return 0, nil, nil, fmt.Errorf("ikev1: response must select one proposal")
+		return 0, nil, nil, fmt.Errorf("ikev1: expected one proposal")
 	}
 	p := proposals[0]
 	return p.proto, p.spi, p.transforms, nil
@@ -285,17 +285,15 @@ func standaloneProposals(proposals []parsedProposal) iter.Seq[parsedProposal] {
 }
 
 func (s *Session) selectIKEOffer(body []byte) (ikeProposal, parsedTransform, error) {
-	proposals, err := parseSA(body)
+	proto, spi, transforms, err := parseSingleProposalSA(body)
 	if err != nil {
 		return ikeProposal{}, parsedTransform{}, err
 	}
-	for p := range standaloneProposals(proposals) {
-		if p.proto != protoISAKMP || len(p.spi) != 0 {
-			continue
-		}
-		if suite, transform, ok := s.selectIKEProposal(p.transforms); ok {
-			return suite, transform, nil
-		}
+	if proto != protoISAKMP || len(spi) != 0 {
+		return ikeProposal{}, parsedTransform{}, fmt.Errorf("ikev1: phase-1 SA malformed")
+	}
+	if suite, transform, ok := s.selectIKEProposal(transforms); ok {
+		return suite, transform, nil
 	}
 	return ikeProposal{}, parsedTransform{}, fmt.Errorf("ikev1: no acceptable IKE proposal offered")
 }

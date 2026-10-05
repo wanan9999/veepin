@@ -257,6 +257,8 @@ Three rules the suite is built on, each of which it broke once:
   its own SPI, and skip unsupported bundles atomically; never reject all chains
   or select only the ESP half of a bundle. Proposal/transform numbering may
   start at zero. Cover this in encrypted Quick Mode and independent interop.
+  Phase one still requires a single Proposal with alternative Transforms,
+  as required by RFC 2409 section 5; do not apply Quick Mode's grammar there.
   Keep peer offer values separate from local IKE/ESP lifetime ceilings; enforce
   the latter through renewal/expiry timers, never by rewriting MM2/AM2/QM2.
   Cover unequal lifetimes with strict initiator validation, omitted/volume
