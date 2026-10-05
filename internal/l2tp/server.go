@@ -692,7 +692,13 @@ func (p *serverPeer) DataFrame(frame []byte) {
 	}
 }
 
-func (p *serverPeer) Closed(err error) { p.beginDrain(err) }
+func (p *serverPeer) Closed(err error) {
+	if errors.Is(err, ErrControlTimeout) {
+		p.srv.removePeer(p, err)
+		return
+	}
+	p.beginDrain(err)
+}
 
 // serverPPP adapts serverPeer to ppp.ServerHandler.
 type serverPPP struct{ p *serverPeer }

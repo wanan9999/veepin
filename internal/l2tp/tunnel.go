@@ -475,6 +475,10 @@ func (t *Tunnel) sendICCN() {
 // ErrTunnelClosed reports a probe on a tunnel that is no longer up.
 var ErrTunnelClosed = errors.New("l2tp: tunnel is closed")
 
+// ErrControlTimeout means the reliable channel has already exhausted its
+// complete retry cycle; there is no graceful exchange left to drain.
+var ErrControlTimeout = errors.New("l2tp: control channel timed out")
+
 // SendHello sends a HELLO and waits for the peer to acknowledge it.
 //
 // HELLO is L2TP's keepalive (RFC 2661 section 6.5) and it is the one control
@@ -623,7 +627,7 @@ func (t *Tunnel) onRetransmit(generation uint64) {
 	t.retries++
 	if t.retries > maxRetransmits {
 		t.mu.Unlock()
-		t.finishClose(fmt.Errorf("l2tp: control channel timed out"))
+		t.finishClose(ErrControlTimeout)
 		return
 	}
 	if t.unacked[0].sent {

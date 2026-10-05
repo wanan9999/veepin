@@ -25,6 +25,18 @@ func lifecycleServer(t *testing.T) *Server {
 	return s
 }
 
+func TestExhaustedControlRetriesDoNotStartAnotherDrainPeriod(t *testing.T) {
+	s := lifecycleServer(t)
+	p := s.peerFor([8]byte{1}, &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1), Port: 500}, false)
+	p.Closed(ErrControlTimeout)
+	p.mu.Lock()
+	closed, draining := p.closed, p.draining
+	p.mu.Unlock()
+	if !closed || draining || s.gate.HalfOpen() != 0 {
+		t.Fatal("expired control channel retained resources for a second retry cycle")
+	}
+}
+
 func TestAdmissionIsReleasedAfterRepeatedDisconnects(t *testing.T) {
 	s := lifecycleServer(t)
 	for n := range 600 {
